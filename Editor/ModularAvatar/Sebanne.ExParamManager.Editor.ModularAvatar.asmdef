@@ -1,0 +1,29 @@
+{
+  "name": "Sebanne.ExParamManager.Editor.ModularAvatar",
+  "rootNamespace": "Sebanne.ExParamManager.Editor.ModularAvatar",
+  "references": [
+    "Sebanne.ExParamManager",
+    "Sebanne.ExParamManager.Editor",
+    "nadena.dev.modular-avatar.core",
+    "VRC.SDK3A"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "HAS_MODULAR_AVATAR"
+  ],
+  "versionDefines": [
+    {
+      "name": "nadena.dev.modular-avatar",
+      "expression": "1.11.2",
+      "define": "HAS_MODULAR_AVATAR"
+    }
+  ],
+  "noEngineReferences": false
+}

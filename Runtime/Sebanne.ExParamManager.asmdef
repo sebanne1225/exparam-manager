@@ -1,6 +1,9 @@
 {
   "name": "Sebanne.ExParamManager",
-  "references": [],
+  "rootNamespace": "Sebanne.ExParamManager",
+  "references": [
+    "nadena.dev.ndmf.runtime"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

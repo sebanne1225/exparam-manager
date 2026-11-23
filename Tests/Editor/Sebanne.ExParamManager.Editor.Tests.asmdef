@@ -1,0 +1,47 @@
+{
+  "name": "Sebanne.ExParamManager.Editor.Tests",
+  "rootNamespace": "Sebanne.ExParamManager.Editor.Tests",
+  "references": [
+    "Sebanne.ExParamManager",
+    "Sebanne.ExParamManager.Editor",
+    "nadena.dev.ndmf",
+    "nadena.dev.ndmf.vrchat",
+    "nadena.dev.ndmf.runtime",
+    "VRC.SDK3A",
+    "VRC.SDKBase"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "VRCSDKBase.dll",
+    "VRCSDKBase-Editor.dll",
+    "VRCSDK3A.dll",
+    "VRCSDK3A-Editor.dll",
+    "VRC.Dynamics.dll",
+    "VRC.SDK3.Dynamics.Contact.dll",
+    "VRC.SDK3.Dynamics.PhysBone.dll"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.vrchat.avatars",
+      "expression": "3.10.6",
+      "define": "HAS_VRCSDK3_AVATARS_3_10_6"
+    },
+    {
+      "name": "nadena.dev.ndmf",
+      "expression": "1.15.0",
+      "define": "HAS_NDMF_1_15"
+    }
+  ],
+  "noEngineReferences": false
+}
