@@ -1,0 +1,18 @@
+{
+  "name": "com.sebanne.exparam-manager",
+  "displayName": "ExParam Manager",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "VRChat アバターの Expression Parameters を可視化・逆引きし、削除・非同期化・bit 幅縮小を非破壊で行う NDMF ツール",
+  "documentationUrl": "https://github.com/sebanne1225/exparam-manager/blob/main/README.md",
+  "changelogUrl": "https://github.com/sebanne1225/exparam-manager/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/sebanne1225/exparam-manager/blob/main/LICENSE",
+  "url": "https://github.com/sebanne1225/exparam-manager",
+  "author": {
+    "name": "sebanne"
+  },
+  "vpmDependencies": {
+    "com.vrchat.avatars": ">=3.5.0",
+    "nadena.dev.ndmf": ">=1.5.4"
+  }
+}
