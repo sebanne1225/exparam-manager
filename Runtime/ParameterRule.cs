@@ -21,6 +21,10 @@ namespace Sebanne.ExParamManager
         public ParameterAction action = ParameterAction.Keep;
         public int targetBitWidth = MaxBitWidth;
         public bool hideMenuControlsOnRemove = true;
+        public bool disabled;
+
+        public bool IsEnabled => !disabled;
+        public bool IsActive => !disabled && action != ParameterAction.Keep;
 
         /// <summary>
         /// 有効範囲（2..8 bit）にクランプした目標 bit 幅を返す。
@@ -45,6 +49,7 @@ namespace Sebanne.ExParamManager
                 action = action,
                 targetBitWidth = targetBitWidth,
                 hideMenuControlsOnRemove = hideMenuControlsOnRemove,
+                disabled = disabled,
             };
         }
     }

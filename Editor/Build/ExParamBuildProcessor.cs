@@ -66,7 +66,7 @@ namespace Sebanne.ExParamManager.Editor
                 for (int i = 0; i < comp.rules.Count; i++)
                 {
                     ParameterRule rule = comp.rules[i];
-                    if (rule == null || rule.action == ParameterAction.Keep)
+                    if (rule == null || rule.disabled || rule.action == ParameterAction.Keep)
                     {
                         continue;
                     }

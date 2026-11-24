@@ -122,6 +122,7 @@ namespace Sebanne.ExParamManager.Editor
         public string SourceObjectPath = string.Empty;
         public string PrefabGroupKey = string.Empty;
         public string PrefabGroupDisplayName = string.Empty;
+        public UnityEngine.Object PrefabGroupRootObject;
 
         public bool IsInBaseExpressionParameters;
         public bool IsFromNdmfProvider;

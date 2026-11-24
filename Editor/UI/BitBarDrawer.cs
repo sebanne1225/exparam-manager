@@ -15,6 +15,8 @@ namespace Sebanne.ExParamManager.Editor
         public readonly int MakeLocalRuleCount;
         public readonly int ResizeRuleCount;
         public readonly int SkippedResizeOnOldSdkCount;
+        public readonly int DisabledRuleCount;
+        public readonly bool IsGloballyDisabled;
 
         public BitProjection(
             int beforeBits,
@@ -22,7 +24,9 @@ namespace Sebanne.ExParamManager.Editor
             int removeRuleCount,
             int makeLocalRuleCount,
             int resizeRuleCount,
-            int skippedResizeOnOldSdkCount)
+            int skippedResizeOnOldSdkCount,
+            int disabledRuleCount = 0,
+            bool isGloballyDisabled = false)
         {
             BeforeBits = beforeBits;
             AfterBits = afterBits;
@@ -31,6 +35,8 @@ namespace Sebanne.ExParamManager.Editor
             MakeLocalRuleCount = makeLocalRuleCount;
             ResizeRuleCount = resizeRuleCount;
             SkippedResizeOnOldSdkCount = skippedResizeOnOldSdkCount;
+            DisabledRuleCount = disabledRuleCount;
+            IsGloballyDisabled = isGloballyDisabled;
         }
     }
 
@@ -52,6 +58,8 @@ namespace Sebanne.ExParamManager.Editor
             int localCount = 0;
             int resizeCount = 0;
             int skippedOldSdk = 0;
+            int disabledCount = 0;
+            bool globallyDisabled = component != null && !component.enabledOnBuild;
 
             for (int i = 0; i < scan.Parameters.Count; i++)
             {
@@ -64,6 +72,19 @@ namespace Sebanne.ExParamManager.Editor
                     : null;
 
                 if (rule == null || rule.action == ParameterAction.Keep || p.IsInternalParameter)
+                {
+                    afterBits += cur;
+                    continue;
+                }
+
+                if (rule.disabled)
+                {
+                    disabledCount++;
+                    afterBits += cur;
+                    continue;
+                }
+
+                if (globallyDisabled)
                 {
                     afterBits += cur;
                     continue;
@@ -102,7 +123,7 @@ namespace Sebanne.ExParamManager.Editor
                 }
             }
 
-            return new BitProjection(beforeBits, afterBits, removeCount, localCount, resizeCount, skippedOldSdk);
+            return new BitProjection(beforeBits, afterBits, removeCount, localCount, resizeCount, skippedOldSdk, disabledCount, globallyDisabled);
         }
 
         public static void DrawBitBar(BitProjection projection)
@@ -122,9 +143,11 @@ namespace Sebanne.ExParamManager.Editor
 
             Color fillColor = projection.AfterBits > maxCost
                 ? new Color(0.82f, 0.24f, 0.24f, 1f)
-                : projection.AfterBits > 200
-                    ? new Color(0.85f, 0.60f, 0.18f, 1f)
-                    : new Color(0.24f, 0.65f, 0.38f, 1f);
+                : projection.IsGloballyDisabled
+                    ? new Color(0.42f, 0.44f, 0.48f, 1f)
+                    : projection.AfterBits > 200
+                        ? new Color(0.85f, 0.60f, 0.18f, 1f)
+                        : new Color(0.24f, 0.65f, 0.38f, 1f);
 
             var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * afterRatio), rect.height - 2f);
             EditorGUI.DrawRect(fillRect, fillColor);
@@ -146,6 +169,11 @@ namespace Sebanne.ExParamManager.Editor
             {
                 int remaining = maxCost - projection.AfterBits;
                 text = $"同期 bit: {projection.AfterBits} / {maxCost} bit（残り {remaining} bit）";
+            }
+
+            if (projection.IsGloballyDisabled)
+            {
+                text += "（全体一時オフ中）";
             }
 
             var style = new GUIStyle(EditorStyles.boldLabel)

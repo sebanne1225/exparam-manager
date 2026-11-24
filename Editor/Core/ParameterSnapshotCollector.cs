@@ -132,7 +132,7 @@ namespace Sebanne.ExParamManager.Editor
 
             Component srcComp = provided.Source;
             bool isFromDescriptor = srcComp == descriptor;
-            (string groupKey, string groupDisplay) = ResolvePrefabGroup(avatarRoot, srcComp);
+            (string groupKey, string groupDisplay, GameObject groupRoot) = ResolvePrefabGroup(avatarRoot, srcComp);
 
             string pluginQName = provided.Plugin != null ? (provided.Plugin.QualifiedName ?? string.Empty) : string.Empty;
             string pluginDispName = provided.Plugin != null ? (provided.Plugin.DisplayName ?? pluginQName) : string.Empty;
@@ -160,6 +160,7 @@ namespace Sebanne.ExParamManager.Editor
                 SourceObjectPath = GetRelativePath(avatarRoot, srcComp),
                 PrefabGroupKey = groupKey,
                 PrefabGroupDisplayName = groupDisplay,
+                PrefabGroupRootObject = groupRoot,
                 IsInBaseExpressionParameters = hasBase || isFromDescriptor,
                 IsFromNdmfProvider = true,
             };
@@ -222,12 +223,13 @@ namespace Sebanne.ExParamManager.Editor
                 SourceObjectPath = string.Empty,
                 PrefabGroupKey = "root",
                 PrefabGroupDisplayName = descriptor.gameObject.name + " (アバター本体)",
+                PrefabGroupRootObject = descriptor.gameObject,
                 IsInBaseExpressionParameters = true,
                 IsFromNdmfProvider = false,
             };
         }
 
-        private static void BuildPrefabGroups(AvatarScanResult result, GameObject avatarRoot)
+        public static void BuildPrefabGroups(AvatarScanResult result, GameObject avatarRoot)
         {
             var groups = new Dictionary<string, PrefabBitGroup>(StringComparer.Ordinal);
             int totalBits = 0;
@@ -241,8 +243,8 @@ namespace Sebanne.ExParamManager.Editor
                 string key = string.IsNullOrEmpty(p.PrefabGroupKey) ? "root" : p.PrefabGroupKey;
                 if (!groups.TryGetValue(key, out PrefabBitGroup grp))
                 {
-                    UnityEngine.Object rootObj = p.SourceComponent != null
-                        ? (UnityEngine.Object)(PrefabUtility.GetNearestPrefabInstanceRoot(p.SourceComponent.gameObject) ?? p.SourceComponent.gameObject)
+                    UnityEngine.Object rootObj = p.PrefabGroupRootObject != null
+                        ? p.PrefabGroupRootObject
                         : avatarRoot;
                     grp = new PrefabBitGroup
                     {
@@ -269,17 +271,17 @@ namespace Sebanne.ExParamManager.Editor
                     .ThenBy(g => g.DisplayName, StringComparer.OrdinalIgnoreCase));
         }
 
-        private static (string key, string display) ResolvePrefabGroup(GameObject avatarRoot, Component src)
+        public static (string key, string display, GameObject rootObj) ResolvePrefabGroup(GameObject avatarRoot, Component src)
         {
             if (src == null || src.gameObject == avatarRoot)
             {
-                return ("root", avatarRoot.name + " (アバター本体)");
+                return ("root", avatarRoot.name + " (アバター本体)", avatarRoot);
             }
 
             GameObject prefabRoot = PrefabUtility.GetNearestPrefabInstanceRoot(src.gameObject);
             if (prefabRoot != null && prefabRoot != avatarRoot && prefabRoot.transform.IsChildOf(avatarRoot.transform))
             {
-                return ("prefab:" + prefabRoot.GetInstanceID(), prefabRoot.name);
+                return ("prefab:" + prefabRoot.GetInstanceID(), prefabRoot.name, prefabRoot);
             }
 
             Transform topChild = src.transform;
@@ -288,7 +290,7 @@ namespace Sebanne.ExParamManager.Editor
                 topChild = topChild.parent;
             }
 
-            return ("sub:" + topChild.gameObject.GetInstanceID(), topChild.gameObject.name);
+            return ("sub:" + topChild.gameObject.GetInstanceID(), topChild.gameObject.name, topChild.gameObject);
         }
 
         private static string GetRelativePath(GameObject avatarRoot, Component comp)

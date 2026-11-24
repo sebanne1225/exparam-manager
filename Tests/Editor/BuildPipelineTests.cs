@@ -364,5 +364,97 @@ namespace Sebanne.ExParamManager.Editor.Tests
                 UnityEditor.AssetDatabase.Refresh();
             }
         }
+
+        [Test]
+        public void Pass1AndPass2_SkipsDisabledRules_AndKeepsParameterIntact()
+        {
+            var root = Track(new GameObject("AvatarRoot"));
+            var desc = root.AddComponent<VRCAvatarDescriptor>();
+
+            var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+            expParams.parameters = new[]
+            {
+                new VRCExpressionParameters.Parameter { name = "ActiveRemove", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "PausedRemove", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
+            };
+            desc.expressionParameters = expParams;
+
+            var comp = root.AddComponent<ExParamManagerComponent>();
+            comp.rules.Add(new ParameterRule { parameterName = "ActiveRemove", action = ParameterAction.Remove, disabled = false });
+            comp.rules.Add(new ParameterRule { parameterName = "PausedRemove", action = ParameterAction.Remove, disabled = true });
+
+            var ctx = new BuildContext(root, null, isClone: true);
+            ExParamBuildProcessor.RunPass1(ctx);
+            ExParamBuildProcessor.RunPass2(ctx);
+
+            VRCExpressionParameters resultParams = desc.expressionParameters;
+            Assert.IsFalse(resultParams.parameters.Any(p => p.name == "ActiveRemove"));
+            Assert.IsTrue(resultParams.parameters.Any(p => p.name == "PausedRemove"));
+        }
+
+        [Test]
+        public void Pass1AndPass2_SkipsAllRules_WhenEnabledOnBuildIsFalse()
+        {
+            var root = Track(new GameObject("AvatarRoot"));
+            var desc = root.AddComponent<VRCAvatarDescriptor>();
+
+            var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+            expParams.parameters = new[]
+            {
+                new VRCExpressionParameters.Parameter { name = "KeepByGlobalOff1", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "KeepByGlobalOff2", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
+            };
+            desc.expressionParameters = expParams;
+
+            var comp = root.AddComponent<ExParamManagerComponent>();
+            comp.enabledOnBuild = false;
+            comp.rules.Add(new ParameterRule { parameterName = "KeepByGlobalOff1", action = ParameterAction.Remove });
+            comp.rules.Add(new ParameterRule { parameterName = "KeepByGlobalOff2", action = ParameterAction.MakeLocal });
+
+            var ctx = new BuildContext(root, null, isClone: true);
+            ExParamBuildProcessor.RunPass1(ctx);
+            ExParamBuildProcessor.RunPass2(ctx);
+
+            VRCExpressionParameters resultParams = desc.expressionParameters;
+            Assert.IsTrue(resultParams.parameters.Any(p => p.name == "KeepByGlobalOff1"));
+            Assert.IsTrue(resultParams.parameters.First(p => p.name == "KeepByGlobalOff2").networkSynced);
+        }
+
+        [Test]
+        public void BitBarProjection_ExcludesDisabledRules_AndGlobalDisabledState()
+        {
+            var root = Track(new GameObject("AvatarRoot"));
+            var desc = root.AddComponent<VRCAvatarDescriptor>();
+            var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+            expParams.parameters = new[]
+            {
+                new VRCExpressionParameters.Parameter { name = "ActiveBool", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "PausedInt", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
+            };
+            desc.expressionParameters = expParams;
+
+            var comp = root.AddComponent<ExParamManagerComponent>();
+            comp.rules.Add(new ParameterRule { parameterName = "ActiveBool", action = ParameterAction.Remove, disabled = false });
+            comp.rules.Add(new ParameterRule { parameterName = "PausedInt", action = ParameterAction.MakeLocal, disabled = true });
+
+            AvatarScanResult scan = AvatarScanner.Scan(desc);
+
+            BitProjection partial = BitBarDrawer.CalculateProjection(scan, comp, allowBitWidthResize: true);
+            Assert.AreEqual(9, partial.BeforeBits);
+            Assert.AreEqual(8, partial.AfterBits);
+            Assert.AreEqual(1, partial.SavedBits);
+            Assert.AreEqual(1, partial.RemoveRuleCount);
+            Assert.AreEqual(0, partial.MakeLocalRuleCount);
+            Assert.AreEqual(1, partial.DisabledRuleCount);
+            Assert.IsFalse(partial.IsGloballyDisabled);
+
+            comp.enabledOnBuild = false;
+            BitProjection globalOff = BitBarDrawer.CalculateProjection(scan, comp, allowBitWidthResize: true);
+            Assert.AreEqual(9, globalOff.BeforeBits);
+            Assert.AreEqual(9, globalOff.AfterBits);
+            Assert.AreEqual(0, globalOff.SavedBits);
+            Assert.AreEqual(1, globalOff.DisabledRuleCount);
+            Assert.IsTrue(globalOff.IsGloballyDisabled);
+        }
     }
 }

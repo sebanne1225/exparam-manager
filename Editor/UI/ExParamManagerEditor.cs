@@ -58,12 +58,24 @@ namespace Sebanne.ExParamManager.Editor
                 }
             }
 
+            if (!comp.enabledOnBuild)
+            {
+                EditorGUILayout.HelpBox("現在 ExParam Manager は一時オフです（ビルド時に削減ルールは適用されません）。", MessageType.Warning);
+            }
+
             BitProjection projection = BitBarDrawer.CalculateProjection(_cachedScan, comp, EnvironmentCapabilities.HasVrcSdk3106);
             BitBarDrawer.DrawBitBar(projection);
 
-            EditorGUILayout.LabelField(
-                $"ルール内訳: 削除 {projection.RemoveRuleCount} 件 / 自分だけ(非同期) {projection.MakeLocalRuleCount} 件 / bit 幅縮小 {projection.ResizeRuleCount} 件",
-                EditorStyles.miniLabel);
+            string breakdown = $"ルール内訳: 削除 {projection.RemoveRuleCount} 件 / 自分だけ(非同期) {projection.MakeLocalRuleCount} 件 / bit 幅縮小 {projection.ResizeRuleCount} 件";
+            if (projection.DisabledRuleCount > 0)
+            {
+                breakdown += $" / 一時オフ {projection.DisabledRuleCount} 件";
+            }
+            if (!comp.enabledOnBuild)
+            {
+                breakdown += "（全体オフ中）";
+            }
+            EditorGUILayout.LabelField(breakdown, EditorStyles.miniLabel);
 
             if (projection.ResizeRuleCount > 0)
             {

@@ -62,6 +62,14 @@ namespace Sebanne.ExParamManager.Editor.Tests
                     hideMenuControlsOnRemove = false,
                 };
 
+                Assert.IsFalse(rule.disabled);
+                Assert.IsTrue(rule.IsEnabled);
+                Assert.IsTrue(rule.IsActive);
+
+                rule.disabled = true;
+                Assert.IsFalse(rule.IsEnabled);
+                Assert.IsFalse(rule.IsActive);
+
                 Assert.AreEqual(2, rule.GetClampedBitWidth());
                 rule.targetBitWidth = 9;
                 Assert.AreEqual(8, rule.GetClampedBitWidth());
@@ -78,6 +86,7 @@ namespace Sebanne.ExParamManager.Editor.Tests
                 Assert.AreEqual(rule.action, cloned.action);
                 Assert.AreEqual(rule.targetBitWidth, cloned.targetBitWidth);
                 Assert.AreEqual(rule.hideMenuControlsOnRemove, cloned.hideMenuControlsOnRemove);
+                Assert.AreEqual(rule.disabled, cloned.disabled);
             }
             finally
             {

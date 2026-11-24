@@ -247,5 +247,39 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.IsFalse(scan.Parameters.Find(p => p.EffectiveName == "Ear_CustomOther").HasPhysBoneOrContact);
             Assert.IsTrue(scan.Parameters.Find(p => p.EffectiveName == "HeadPat").HasPhysBoneOrContact);
         }
+
+        [Test]
+        public void PrefabGroup_ResolvesTopLevelChildRootObject_ForNonPrefabSubtree()
+        {
+            var avatarRoot = Track(new GameObject("AvatarRoot"));
+            var outfitRoot = new GameObject("OutfitRoot");
+            outfitRoot.transform.SetParent(avatarRoot.transform);
+            var nestedChild = new GameObject("NestedChild");
+            nestedChild.transform.SetParent(outfitRoot.transform);
+            var marker = nestedChild.AddComponent<VRCPhysBone>();
+
+            (string key, string display, GameObject resolvedRoot) =
+                ParameterSnapshotCollector.ResolvePrefabGroup(avatarRoot, marker);
+
+            Assert.IsTrue(key.StartsWith("sub:"));
+            Assert.AreEqual("OutfitRoot", display);
+            Assert.AreSame(outfitRoot, resolvedRoot);
+
+            var scan = new AvatarScanResult { AvatarRoot = avatarRoot };
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "OutfitParam",
+                ValueKind = ParameterValueKind.Bool,
+                IsSynced = true,
+                SourceComponent = marker,
+                PrefabGroupKey = key,
+                PrefabGroupDisplayName = display,
+                PrefabGroupRootObject = resolvedRoot,
+            });
+
+            ParameterSnapshotCollector.BuildPrefabGroups(scan, avatarRoot);
+            Assert.AreEqual(1, scan.PrefabGroups.Count);
+            Assert.AreSame(outfitRoot, scan.PrefabGroups[0].RootObject);
+        }
     }
 }
