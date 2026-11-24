@@ -1,0 +1,41 @@
+{
+  "name": "Sebanne.ExParamManager.Editor.ModularAvatar.Tests",
+  "rootNamespace": "Sebanne.ExParamManager.Editor.ModularAvatar.Tests",
+  "references": [
+    "Sebanne.ExParamManager",
+    "Sebanne.ExParamManager.Editor",
+    "Sebanne.ExParamManager.Editor.ModularAvatar",
+    "nadena.dev.modular-avatar.core",
+    "nadena.dev.ndmf",
+    "nadena.dev.ndmf.vrchat",
+    "nadena.dev.ndmf.runtime",
+    "VRC.SDK3A",
+    "VRC.SDKBase"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "VRCSDKBase.dll",
+    "VRCSDK3A.dll"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "HAS_MODULAR_AVATAR"
+  ],
+  "versionDefines": [
+    {
+      "name": "nadena.dev.modular-avatar",
+      "expression": "1.11.2",
+      "define": "HAS_MODULAR_AVATAR"
+    }
+  ],
+  "noEngineReferences": false
+}
