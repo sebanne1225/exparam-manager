@@ -281,5 +281,96 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.AreEqual(1, scan.PrefabGroups.Count);
             Assert.AreSame(outfitRoot, scan.PrefabGroups[0].RootObject);
         }
+
+        [Test]
+        public void PrefabGroup_OrdersByHierarchy_AvatarRootFirstThenSiblingOrder()
+        {
+            var avatarRoot = Track(new GameObject("AvatarRoot"));
+            var secondChild = new GameObject("SecondChild");
+            var firstChild = new GameObject("FirstChild");
+            var thirdChild = new GameObject("ThirdChild");
+
+            firstChild.transform.SetParent(avatarRoot.transform);
+            secondChild.transform.SetParent(avatarRoot.transform);
+            thirdChild.transform.SetParent(avatarRoot.transform);
+            firstChild.transform.SetSiblingIndex(0);
+            secondChild.transform.SetSiblingIndex(1);
+            thirdChild.transform.SetSiblingIndex(2);
+
+            var pbFirst = firstChild.AddComponent<VRCPhysBone>();
+            var pbSecond = secondChild.AddComponent<VRCPhysBone>();
+            var pbThird = thirdChild.AddComponent<VRCPhysBone>();
+
+            var scan = new AvatarScanResult { AvatarRoot = avatarRoot };
+            // bit 順なら Second(16b) -> Third(8b) -> Root(1b) -> First(1b) になるデータ
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "P_Second_16",
+                ValueKind = ParameterValueKind.Int,
+                CurrentBitWidth = 8,
+                IsSynced = true,
+                SourceComponent = pbSecond,
+                PrefabGroupKey = "sub:" + secondChild.GetInstanceID(),
+                PrefabGroupDisplayName = "SecondChild",
+                PrefabGroupRootObject = secondChild,
+            });
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "P_Second_16_B",
+                ValueKind = ParameterValueKind.Float,
+                CurrentBitWidth = 8,
+                IsSynced = true,
+                SourceComponent = pbSecond,
+                PrefabGroupKey = "sub:" + secondChild.GetInstanceID(),
+                PrefabGroupDisplayName = "SecondChild",
+                PrefabGroupRootObject = secondChild,
+            });
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "P_Third_8",
+                ValueKind = ParameterValueKind.Int,
+                CurrentBitWidth = 8,
+                IsSynced = true,
+                SourceComponent = pbThird,
+                PrefabGroupKey = "sub:" + thirdChild.GetInstanceID(),
+                PrefabGroupDisplayName = "ThirdChild",
+                PrefabGroupRootObject = thirdChild,
+            });
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "P_Root_1",
+                ValueKind = ParameterValueKind.Bool,
+                CurrentBitWidth = 1,
+                IsSynced = true,
+                PrefabGroupKey = "root",
+                PrefabGroupDisplayName = "AvatarRoot (アバター本体)",
+                PrefabGroupRootObject = avatarRoot,
+            });
+            scan.Parameters.Add(new ParameterSnapshot
+            {
+                EffectiveName = "P_First_1",
+                ValueKind = ParameterValueKind.Bool,
+                CurrentBitWidth = 1,
+                IsSynced = true,
+                SourceComponent = pbFirst,
+                PrefabGroupKey = "sub:" + firstChild.GetInstanceID(),
+                PrefabGroupDisplayName = "FirstChild",
+                PrefabGroupRootObject = firstChild,
+            });
+
+            ParameterSnapshotCollector.BuildPrefabGroups(scan, avatarRoot);
+
+            Assert.AreEqual(4, scan.PrefabGroups.Count);
+            Assert.AreEqual("root", scan.PrefabGroups[0].GroupKey);
+            Assert.AreEqual("FirstChild", scan.PrefabGroups[1].DisplayName);
+            Assert.AreEqual("SecondChild", scan.PrefabGroups[2].DisplayName);
+            Assert.AreEqual("ThirdChild", scan.PrefabGroups[3].DisplayName);
+
+            for (int i = 0; i < 4; i++)
+            {
+                Assert.AreEqual(i, scan.PrefabGroups[i].HierarchyOrder);
+                Assert.AreEqual(i, scan.PrefabGroups[i].ColorIndex);
+            }
+        }
     }
 }

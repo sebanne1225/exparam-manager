@@ -265,10 +265,95 @@ namespace Sebanne.ExParamManager.Editor
 
             result.TotalSyncedBits = totalBits;
             result.TotalParameterCount = result.Parameters.Count;
-            result.PrefabGroups.AddRange(
-                groups.Values
-                    .OrderByDescending(g => g.TotalSyncedBits)
-                    .ThenBy(g => g.DisplayName, StringComparer.OrdinalIgnoreCase));
+
+            Transform avatarRootTransform = avatarRoot != null ? avatarRoot.transform : null;
+            var entries = new List<KeyValuePair<PrefabBitGroup, int[]>>(groups.Count);
+            foreach (PrefabBitGroup g in groups.Values)
+            {
+                entries.Add(new KeyValuePair<PrefabBitGroup, int[]>(
+                    g,
+                    BuildHierarchyPath(avatarRootTransform, g.GroupKey, g.RootObject)));
+            }
+
+            entries.Sort((a, b) =>
+            {
+                int cmp = CompareHierarchyPaths(a.Value, b.Value);
+                if (cmp != 0) return cmp;
+                cmp = b.Key.TotalSyncedBits.CompareTo(a.Key.TotalSyncedBits);
+                if (cmp != 0) return cmp;
+                return StringComparer.OrdinalIgnoreCase.Compare(a.Key.DisplayName, b.Key.DisplayName);
+            });
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                PrefabBitGroup grp = entries[i].Key;
+                grp.HierarchyOrder = i;
+                grp.ColorIndex = i;
+                result.PrefabGroups.Add(grp);
+            }
+        }
+
+        private static int[] BuildHierarchyPath(Transform avatarRootTransform, string groupKey, UnityEngine.Object groupRootObj)
+        {
+            if (groupKey == "root" || avatarRootTransform == null)
+            {
+                return Array.Empty<int>();
+            }
+
+            Transform targetTransform = null;
+            if (groupRootObj is GameObject go)
+            {
+                targetTransform = go.transform;
+            }
+            else if (groupRootObj is Component comp)
+            {
+                targetTransform = comp.transform;
+            }
+
+            if (targetTransform == null)
+            {
+                return new[] { int.MaxValue };
+            }
+
+            if (targetTransform == avatarRootTransform)
+            {
+                return Array.Empty<int>();
+            }
+
+            if (!targetTransform.IsChildOf(avatarRootTransform))
+            {
+                return new[] { int.MaxValue };
+            }
+
+            var indices = new List<int>();
+            Transform cur = targetTransform;
+            while (cur != null && cur != avatarRootTransform)
+            {
+                indices.Add(cur.GetSiblingIndex());
+                cur = cur.parent;
+            }
+
+            indices.Reverse();
+            return indices.ToArray();
+        }
+
+        private static int CompareHierarchyPaths(int[] x, int[] y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x == null) return -1;
+            if (y == null) return 1;
+
+            int minLen = Math.Min(x.Length, y.Length);
+            for (int i = 0; i < minLen; i++)
+            {
+                int cmp = x[i].CompareTo(y[i]);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+            }
+
+            return x.Length.CompareTo(y.Length);
         }
 
         public static (string key, string display, GameObject rootObj) ResolvePrefabGroup(GameObject avatarRoot, Component src)

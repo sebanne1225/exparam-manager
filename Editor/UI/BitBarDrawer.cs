@@ -168,13 +168,147 @@ namespace Sebanne.ExParamManager.Editor
                 afterSyncedCount);
         }
 
+        private static readonly Color[] GroupPalette =
+        {
+            new Color(0.32f, 0.56f, 0.86f, 1f), // 0: アバター本体（スチールブルー）
+            new Color(0.28f, 0.72f, 0.46f, 1f), // 1: エメラルド
+            new Color(0.90f, 0.56f, 0.22f, 1f), // 2: オレンジ
+            new Color(0.64f, 0.44f, 0.86f, 1f), // 3: パープル
+            new Color(0.24f, 0.72f, 0.82f, 1f), // 4: シアン
+            new Color(0.86f, 0.40f, 0.58f, 1f), // 5: ローズ
+            new Color(0.58f, 0.76f, 0.26f, 1f), // 6: ライム
+            new Color(0.88f, 0.74f, 0.24f, 1f), // 7: アンバー
+            new Color(0.36f, 0.46f, 0.88f, 1f), // 8: インディゴ
+            new Color(0.88f, 0.42f, 0.34f, 1f), // 9: コーラル
+            new Color(0.22f, 0.66f, 0.62f, 1f), // 10: ティール
+            new Color(0.76f, 0.52f, 0.82f, 1f), // 11: ラベンダー
+        };
+
+        public static Color GetGroupColor(int colorIndex)
+        {
+            int idx = ((colorIndex % GroupPalette.Length) + GroupPalette.Length) % GroupPalette.Length;
+            return GroupPalette[idx];
+        }
+
+        public static bool DrawPrefabGroupRatioBar(
+            IReadOnlyList<PrefabBitGroup> orderedGroups,
+            int totalSyncedBits,
+            string selectedGroupKey,
+            out string clickedGroupKey,
+            out UnityEngine.Object clickedRootObject)
+        {
+            clickedGroupKey = string.Empty;
+            clickedRootObject = null;
+
+            Rect rect = GUILayoutUtility.GetRect(18f, 16f, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.14f, 0.14f, 0.14f, 1f));
+
+            if (orderedGroups == null || orderedGroups.Count == 0 || totalSyncedBits <= 0)
+            {
+                return false;
+            }
+
+            int maxCost = VRCExpressionParameters.MAX_PARAMETER_COST;
+            int denom = Mathf.Max(maxCost, totalSyncedBits);
+            float innerX = rect.x + 1f;
+            float innerY = rect.y + 1f;
+            float innerW = Mathf.Max(0f, rect.width - 2f);
+            float innerH = Mathf.Max(0f, rect.height - 2f);
+
+            var segLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                clipping = TextClipping.Clip,
+                normal = { textColor = Color.white },
+            };
+
+            bool hasSelection = !string.IsNullOrEmpty(selectedGroupKey);
+            bool clicked = false;
+            float cursorX = innerX;
+
+            for (int i = 0; i < orderedGroups.Count; i++)
+            {
+                PrefabBitGroup g = orderedGroups[i];
+                if (g == null || g.TotalSyncedBits <= 0)
+                {
+                    continue;
+                }
+
+                float segW = innerW * (g.TotalSyncedBits / (float)denom);
+                if (segW < 2f)
+                {
+                    segW = 2f;
+                }
+                if (cursorX + segW > innerX + innerW)
+                {
+                    segW = Mathf.Max(0f, innerX + innerW - cursorX);
+                }
+                if (segW <= 0f)
+                {
+                    break;
+                }
+
+                var segRect = new Rect(cursorX, innerY, segW, innerH);
+                Color baseCol = GetGroupColor(g.ColorIndex);
+                bool isSelected = hasSelection && selectedGroupKey == g.GroupKey;
+                Color drawCol = (hasSelection && !isSelected)
+                    ? new Color(baseCol.r, baseCol.g, baseCol.b, 0.35f)
+                    : baseCol;
+
+                EditorGUI.DrawRect(segRect, drawCol);
+                if (segW > 3f)
+                {
+                    EditorGUI.DrawRect(new Rect(segRect.xMax - 1f, segRect.y, 1f, segRect.height), new Color(0f, 0f, 0f, 0.35f));
+                }
+
+                if (isSelected)
+                {
+                    DrawRectOutline(segRect, Color.white);
+                }
+
+                if (segW >= 30f)
+                {
+                    GUI.Label(segRect, $"{g.TotalSyncedBits}b", segLabelStyle);
+                }
+
+                float pctUsed = totalSyncedBits > 0 ? (g.TotalSyncedBits * 100f / totalSyncedBits) : 0f;
+                float pctMax = g.TotalSyncedBits * 100f / maxCost;
+                string tip = $"{g.DisplayName}\n{g.TotalSyncedBits} bit（使用分の {pctUsed:0.0}% / {maxCost} bit 枠の {pctMax:0.0}%）\nクリックで絞り込み＆Hierarchy 表示";
+                if (GUI.Button(segRect, new GUIContent(string.Empty, tip), GUIStyle.none))
+                {
+                    clicked = true;
+                    clickedGroupKey = g.GroupKey;
+                    clickedRootObject = g.RootObject;
+                }
+
+                cursorX += segW;
+            }
+
+            if (totalSyncedBits < maxCost && cursorX < innerX + innerW)
+            {
+                var emptyRect = new Rect(cursorX, innerY, innerX + innerW - cursorX, innerH);
+                int freeBits = maxCost - totalSyncedBits;
+                GUI.Label(emptyRect, new GUIContent(string.Empty, $"空き容量: {freeBits} bit / {maxCost} bit"));
+            }
+
+            return clicked;
+        }
+
+        private static void DrawRectOutline(Rect r, Color color)
+        {
+            EditorGUI.DrawRect(new Rect(r.x, r.y, r.width, 1f), color);
+            EditorGUI.DrawRect(new Rect(r.x, r.yMax - 1f, r.width, 1f), color);
+            EditorGUI.DrawRect(new Rect(r.x, r.y, 1f, r.height), color);
+            EditorGUI.DrawRect(new Rect(r.xMax - 1f, r.y, 1f, r.height), color);
+        }
+
         public static void DrawBitBar(BitProjection projection)
         {
             int maxCost = VRCExpressionParameters.MAX_PARAMETER_COST;
             float beforeRatio = Mathf.Clamp01(projection.BeforeBits / (float)maxCost);
             float afterRatio = Mathf.Clamp01(projection.AfterBits / (float)maxCost);
 
-            Rect rect = GUILayoutUtility.GetRect(18, 24, GUILayout.ExpandWidth(true));
+            Rect rect = GUILayoutUtility.GetRect(18, 22, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(rect, new Color(0.14f, 0.14f, 0.14f, 1f));
 
             if (projection.SavedBits > 0)
@@ -194,33 +328,46 @@ namespace Sebanne.ExParamManager.Editor
             var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * afterRatio), rect.height - 2f);
             EditorGUI.DrawRect(fillRect, fillColor);
 
+            bool compact = rect.width < 360f;
             string text;
             if (projection.AfterBits > maxCost)
             {
                 int over = projection.AfterBits - maxCost;
-                text = projection.SavedBits > 0
-                    ? $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）"
-                    : $"同期 bit: {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）";
+                if (compact)
+                {
+                    text = $"{projection.AfterBits}/{maxCost}b (+{over}b)";
+                }
+                else
+                {
+                    text = projection.SavedBits > 0
+                        ? $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）"
+                        : $"同期 bit: {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）";
+                }
             }
             else if (projection.SavedBits > 0)
             {
                 int remaining = maxCost - projection.AfterBits;
-                text = $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（-{projection.SavedBits} bit 削減 / 残り {remaining} bit）";
+                text = compact
+                    ? $"{projection.BeforeBits}→{projection.AfterBits}/{maxCost}b (-{projection.SavedBits}b)"
+                    : $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（-{projection.SavedBits} bit 削減 / 残り {remaining} bit）";
             }
             else
             {
                 int remaining = maxCost - projection.AfterBits;
-                text = $"同期 bit: {projection.AfterBits} / {maxCost} bit（残り {remaining} bit）";
+                text = compact
+                    ? $"{projection.AfterBits}/{maxCost}b (残{remaining}b)"
+                    : $"同期 bit: {projection.AfterBits} / {maxCost} bit（残り {remaining} bit）";
             }
 
             if (projection.IsGloballyDisabled)
             {
-                text += "（全体一時オフ中）";
+                text += compact ? " [オフ]" : "（全体一時オフ中）";
             }
 
             var style = new GUIStyle(EditorStyles.boldLabel)
             {
                 alignment = TextAnchor.MiddleCenter,
+                clipping = TextClipping.Clip,
                 normal = { textColor = Color.white },
             };
             GUI.Label(rect, text, style);
@@ -232,7 +379,7 @@ namespace Sebanne.ExParamManager.Editor
             float beforeRatio = Mathf.Clamp01(beforeBit / (float)safeMax);
             float afterRatio = Mathf.Clamp01(afterBit / (float)safeMax);
 
-            Rect rect = GUILayoutUtility.GetRect(18, 24, GUILayout.ExpandWidth(true));
+            Rect rect = GUILayoutUtility.GetRect(18, 22, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(rect, new Color(0.14f, 0.14f, 0.14f, 1f));
 
             int saved = Mathf.Max(0, beforeBit - afterBit);
@@ -251,15 +398,17 @@ namespace Sebanne.ExParamManager.Editor
             var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * afterRatio), rect.height - 2f);
             EditorGUI.DrawRect(fillRect, fillColor);
 
+            bool compact = rect.width < 260f;
             string text = isPaused
-                ? $"{beforeBit} bit（一時オフ中）"
+                ? (compact ? $"{beforeBit}b (一時オフ)" : $"{beforeBit} bit（一時オフ中）")
                 : saved > 0
-                    ? $"{beforeBit} bit → {afterBit} bit（-{saved} bit 削減）"
-                    : $"{beforeBit} bit（そのまま）";
+                    ? (compact ? $"{beforeBit}→{afterBit}b (-{saved}b)" : $"{beforeBit} bit → {afterBit} bit（-{saved} bit 削減）")
+                    : (compact ? $"{beforeBit}b (そのまま)" : $"{beforeBit} bit（そのまま）");
 
             var style = new GUIStyle(EditorStyles.boldLabel)
             {
                 alignment = TextAnchor.MiddleCenter,
+                clipping = TextClipping.Clip,
                 normal = { textColor = Color.white },
             };
             GUI.Label(rect, text, style);

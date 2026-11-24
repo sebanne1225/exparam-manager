@@ -163,6 +163,8 @@ namespace Sebanne.ExParamManager.Editor
         public int TotalSyncedBits;
         public int SyncedParameterCount;
         public int TotalParameterCount;
+        public int HierarchyOrder;
+        public int ColorIndex;
     }
 
     public sealed class AvatarScanResult
