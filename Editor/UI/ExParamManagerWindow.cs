@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
@@ -62,16 +63,16 @@ namespace Sebanne.ExParamManager.Editor
         private Vector2 _rightScroll;
         private readonly Dictionary<string, bool> _animatorGroupFoldouts = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-        // OnGUI 内で遅延初期化するスタイル
-        private GUIStyle _boldNameStyle;
-        private GUIStyle _subLabelStyle;
-        private GUIStyle _badgeStyle;
-        private GUIStyle _sectionHeaderStyle;
-        private GUIStyle _headerLabelStyle;
-        private GUIStyle _wrappedMiniStyle;
-        private GUIStyle _bigMetricStyle;
-        private GUIStyle _bigDeltaStyle;
-        private GUIStyle _bigPausedStyle;
+        // OnGUI 内で遅延初期化するスタイル（ドメインリロードで空シリアライズ復元されないよう NonSerialized）
+        [NonSerialized] private GUIStyle _boldNameStyle;
+        [NonSerialized] private GUIStyle _subLabelStyle;
+        [NonSerialized] private GUIStyle _badgeStyle;
+        [NonSerialized] private GUIStyle _sectionHeaderStyle;
+        [NonSerialized] private GUIStyle _headerLabelStyle;
+        [NonSerialized] private GUIStyle _wrappedMiniStyle;
+        [NonSerialized] private GUIStyle _bigMetricStyle;
+        [NonSerialized] private GUIStyle _bigDeltaStyle;
+        [NonSerialized] private GUIStyle _bigPausedStyle;
 
         [MenuItem("Tools/Sebanne/ExParam Manager")]
         public static void Open()
@@ -210,7 +211,7 @@ namespace Sebanne.ExParamManager.Editor
 
         private void EnsureStyles()
         {
-            if (_boldNameStyle != null)
+            if (_boldNameStyle != null && _bigMetricStyle != null && _bigDeltaStyle != null && _bigPausedStyle != null)
             {
                 return;
             }
@@ -658,7 +659,7 @@ namespace Sebanne.ExParamManager.Editor
         {
             List<ParameterSnapshot> filtered = GetFilteredAndSortedParameters(comp);
             int total = _scanResult != null ? _scanResult.Parameters.Count : 0;
-            const float fixedRowWidth = 5f + ColWidthTypeBit + ColWidthToggle + ColWidthAction + 42f;
+            const float fixedRowWidth = 5f + ColWidthTypeBit + ColWidthToggle + ColWidthAction + 56f;
             float nameColWidth = Mathf.Max(100f, paneWidth - fixedRowWidth);
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(paneWidth), GUILayout.ExpandHeight(true)))
@@ -803,7 +804,7 @@ namespace Sebanne.ExParamManager.Editor
         {
             if (!string.IsNullOrEmpty(p.PrimaryMenuLabel))
             {
-                return "メニュー: " + p.PrimaryMenuLabel;
+                return "メニュー: " + StripRichTextTags(p.PrimaryMenuLabel);
             }
 
             if (p.References.Count == 0)
@@ -1035,8 +1036,9 @@ namespace Sebanne.ExParamManager.Editor
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField("メニュー / パラメータ", _subLabelStyle);
-                string heading = !string.IsNullOrEmpty(p.PrimaryMenuLabel)
-                    ? $"{p.PrimaryMenuLabel}（{p.EffectiveName}）"
+                string cleanMenu = StripRichTextTags(p.PrimaryMenuLabel);
+                string heading = !string.IsNullOrEmpty(cleanMenu)
+                    ? $"{cleanMenu}（{p.EffectiveName}）"
                     : $"{p.EffectiveName}（メニューなし）";
                 EditorGUILayout.LabelField(heading, _sectionHeaderStyle);
 
@@ -1256,7 +1258,7 @@ namespace Sebanne.ExParamManager.Editor
                 case ParameterAction.ResizeBitWidth:
                     EditorGUILayout.HelpBox(
                         EnvironmentCapabilities.HasVrcSdk3106
-                            ? "※ VRChat の 2 クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。"
+                            ? "※ VRChat の2クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。"
                             : "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小はスキップされます。",
                         MessageType.Warning);
                     break;
@@ -1559,7 +1561,8 @@ namespace Sebanne.ExParamManager.Editor
                 {
                     ParameterReference rf = refs[i];
                     string typeJa = GetMenuControlTypeLabel(rf.MenuControlType);
-                    string itemBase = !string.IsNullOrEmpty(rf.MenuItemLabel) ? rf.MenuItemLabel : rf.DisplayLabel;
+                    string rawBase = !string.IsNullOrEmpty(rf.MenuItemLabel) ? rf.MenuItemLabel : rf.DisplayLabel;
+                    string itemBase = StripRichTextTags(rawBase);
                     string itemLabel = string.IsNullOrEmpty(typeJa) ? itemBase : $"{itemBase} [{typeJa}]";
                     EditorGUILayout.LabelField("・" + itemLabel, EditorStyles.miniLabel);
                 }
@@ -1570,9 +1573,20 @@ namespace Sebanne.ExParamManager.Editor
             {
                 ParameterReference rf = sceneOrUnlinked[i];
                 string typeJa = GetMenuControlTypeLabel(rf.MenuControlType);
-                string label = string.IsNullOrEmpty(typeJa) ? rf.DisplayLabel : $"{rf.DisplayLabel} [{typeJa}]";
+                string cleanDisplay = StripRichTextTags(rf.DisplayLabel);
+                string label = string.IsNullOrEmpty(typeJa) ? cleanDisplay : $"{cleanDisplay} [{typeJa}]";
                 DrawReferenceRow(label, rf.TargetObject);
             }
+        }
+
+        private static string StripRichTextTags(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            return Regex.Replace(text, "<[^>]+>", string.Empty).Trim();
         }
 
         private void DrawGroupedAnimatorReferences(ParameterSnapshot p)
