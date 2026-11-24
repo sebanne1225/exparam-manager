@@ -67,6 +67,8 @@ namespace Sebanne.ExParamManager.Editor
         private int _prefabGroupSortMode; // 0=Hierarchy, 1=BitDesc
         private Vector2 _prefabLegendScroll;
         private bool _showReferencesSection;
+        private bool _showActionGuide;
+        [NonSerialized] private bool _prefabGroupsInitialized;
 
         private string _selectedParamKey = string.Empty;
         private Vector2 _leftScroll;
@@ -209,18 +211,19 @@ namespace Sebanne.ExParamManager.Editor
                 return;
             }
 
-            if (!string.IsNullOrEmpty(_selectedParamKey) && _scanResult.Parameters.Any(p => p.EffectiveName == _selectedParamKey))
-            {
-                return;
-            }
-
             ExParamManagerComponent comp = _targetAvatar != null
                 ? _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true)
                 : null;
             List<ParameterSnapshot> filtered = GetFilteredAndSortedParameters(comp);
+
+            if (!string.IsNullOrEmpty(_selectedParamKey) && filtered.Any(p => p.EffectiveName == _selectedParamKey))
+            {
+                return;
+            }
+
             _selectedParamKey = filtered.Count > 0
                 ? filtered[0].EffectiveName
-                : _scanResult.Parameters[0].EffectiveName;
+                : string.Empty;
         }
 
         private void EnsureStyles()
@@ -333,6 +336,11 @@ namespace Sebanne.ExParamManager.Editor
         private void OnGUI()
         {
             EnsureStyles();
+            if (!_prefabGroupsInitialized && position.height > 100f)
+            {
+                _prefabGroupsInitialized = true;
+                _showPrefabGroups = position.height >= 720f;
+            }
 
             ExParamManagerComponent comp = _targetAvatar != null
                 ? _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true)
@@ -548,7 +556,7 @@ namespace Sebanne.ExParamManager.Editor
                     {
                         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                         {
-                            EditorGUILayout.LabelField("このアバターは閲覧モードです。下のボタンから削減ルールを設定できます（元アバターは変わりません）。", _wrappedMiniStyle);
+                            EditorGUILayout.LabelField("このアバターは閲覧モードです。ボタンを押すとシーン上のアバターへ設定用コンポーネントが追加されます（元の設定アセットは変更されません）。", _wrappedMiniStyle);
                             if (GUILayout.Button("ExParam Manager を追加して編集を始める", GUILayout.Height(24f)))
                             {
                                 Undo.AddComponent<ExParamManagerComponent>(_targetAvatar.gameObject);
@@ -598,10 +606,10 @@ namespace Sebanne.ExParamManager.Editor
 
                     string sdkNote = EnvironmentCapabilities.HasVrcSdk3106
                         ? "・bit 幅縮小（ResizeBitWidth）は VRChat 2 クライアント間同期が未検証の実験的機能です。\n"
-                        : "・現在の SDK（3.10.5 以下）では bit 幅縮小は適用されず、削除・自分だけ（非同期化）のみ有効です。\n";
+                        : "・現在の SDK（3.10.5 以下）では bit 幅縮小は使えず、削除・自分だけ（非同期化）のみ有効です。\n";
 
                     EditorGUILayout.HelpBox(
-                        "・非破壊で動作します：元のアバター・元アセットは変更されません。ビルド時のみ適用され、コンポーネントを外せば元に戻ります。\n"
+                        "・シーンのアバターに設定用コンポーネントを追加して動作します。元の設定アセット（Parameters / Menu / Animator）は変更せず、ビルド時だけ反映されます（コンポーネントを外して再アップロードすれば元に戻ります）。\n"
                         + perfNote
                         + sdkNote
                         + "・Edit Mode 解析のため VRCFury 等 IParameterProvider 未実装コンポーネントがビルド時に追加するパラメータはビルド後に加算されます。",
@@ -680,21 +688,40 @@ namespace Sebanne.ExParamManager.Editor
                     }
                 }
 
+                if (_quickTab == QuickFilterTab.Reducible && !EnvironmentCapabilities.HasVrcSdk3106 && reducibleCount > 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "現在の VRChat SDK（3.10.5 以下）では bit 縮小が使えないため、ここに出る縮小候補の節約は 0 bit です（削除・自分だけは利用できます）。",
+                        MessageType.Info);
+                }
+
                 // 検索・型・並び替え行
+                bool filterChanged = false;
                 if (!narrowSearch)
                 {
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         EditorGUILayout.LabelField("検索", GUILayout.Width(32f));
+                        EditorGUI.BeginChangeCheck();
                         _searchText = EditorGUILayout.TextField(_searchText, GUILayout.MinWidth(80f));
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            filterChanged = true;
+                        }
                         if (!string.IsNullOrEmpty(_searchText) && GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(22f)))
                         {
                             _searchText = string.Empty;
                             GUI.FocusControl(null);
+                            filterChanged = true;
                         }
 
+                        EditorGUI.BeginChangeCheck();
                         _typeFilterIndex = EditorGUILayout.Popup(_typeFilterIndex, TypeFilterLabels, GUILayout.Width(88f));
                         _sortModeIndex = EditorGUILayout.Popup(_sortModeIndex, SortModeLabels, GUILayout.Width(128f));
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            filterChanged = true;
+                        }
                     }
                 }
                 else
@@ -702,18 +729,34 @@ namespace Sebanne.ExParamManager.Editor
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         EditorGUILayout.LabelField("検索", GUILayout.Width(32f));
+                        EditorGUI.BeginChangeCheck();
                         _searchText = EditorGUILayout.TextField(_searchText, GUILayout.ExpandWidth(true));
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            filterChanged = true;
+                        }
                         if (!string.IsNullOrEmpty(_searchText) && GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(22f)))
                         {
                             _searchText = string.Empty;
                             GUI.FocusControl(null);
+                            filterChanged = true;
                         }
                     }
                     using (new EditorGUILayout.HorizontalScope())
                     {
+                        EditorGUI.BeginChangeCheck();
                         _typeFilterIndex = EditorGUILayout.Popup(_typeFilterIndex, TypeFilterLabels, GUILayout.ExpandWidth(true));
                         _sortModeIndex = EditorGUILayout.Popup(_sortModeIndex, SortModeLabels, GUILayout.ExpandWidth(true));
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            filterChanged = true;
+                        }
                     }
+                }
+
+                if (filterChanged)
+                {
+                    EnsureValidSelection();
                 }
 
                 // Prefab / 衣装別集計（2 グループ以上あるときのみ表示）
@@ -864,7 +907,7 @@ namespace Sebanne.ExParamManager.Editor
 
             if (useScroll)
             {
-                _prefabLegendScroll = EditorGUILayout.BeginScrollView(_prefabLegendScroll, GUILayout.Height(104f));
+                _prefabLegendScroll = EditorGUILayout.BeginScrollView(_prefabLegendScroll, GUILayout.Height(98f));
             }
 
             try
@@ -952,6 +995,7 @@ namespace Sebanne.ExParamManager.Editor
         {
             List<ParameterSnapshot> filtered = GetFilteredAndSortedParameters(comp);
             int total = _scanResult != null ? _scanResult.Parameters.Count : 0;
+            int syncedTotal = _scanResult != null ? _scanResult.Parameters.Count(x => x.IsSynced) : 0;
 
             bool ultraCompact = paneWidth < 460f;
             float colTypeBit = ultraCompact ? 46f : ColWidthTypeBit;
@@ -966,7 +1010,7 @@ namespace Sebanne.ExParamManager.Editor
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(paneWidth), heightOpt))
             {
-                EditorGUILayout.LabelField($"パラメータ一覧（表示 {filtered.Count} / 全 {total} 件）", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"パラメータ一覧（表示 {filtered.Count} / 全 {total} 件・うち同期 {syncedTotal} 件）", EditorStyles.boldLabel);
 
                 // 固定幅列ヘッダー（データ行と同じ nameColWidth を使い列ズレを防ぐ）
                 using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -976,6 +1020,7 @@ namespace Sebanne.ExParamManager.Editor
                     GUILayout.Label("型 / bit", _headerLabelStyle, GUILayout.Width(colTypeBit));
                     GUILayout.Label("適用", _headerLabelStyle, GUILayout.Width(colToggle));
                     GUILayout.Label("削減方法", _headerLabelStyle, GUILayout.Width(colAction));
+                    GUILayout.FlexibleSpace();
                 }
 
                 _leftScroll = EditorGUILayout.BeginScrollView(_leftScroll);
@@ -1155,15 +1200,31 @@ namespace Sebanne.ExParamManager.Editor
 
             if (p.Suggestion.HasStrictIntRecommendation)
             {
-                text = $"縮小おすすめ ({p.Suggestion.RecommendedIntBitWidth}b)";
-                color = new Color(0.42f, 0.88f, 0.56f, 1f);
+                if (EnvironmentCapabilities.HasVrcSdk3106)
+                {
+                    text = $"縮小おすすめ ({p.Suggestion.RecommendedIntBitWidth}b)";
+                    color = new Color(0.42f, 0.88f, 0.56f, 1f);
+                }
+                else
+                {
+                    text = "縮小候補 (SDK 3.10.6+)";
+                    color = new Color(0.68f, 0.74f, 0.82f, 1f);
+                }
                 return;
             }
 
             if (p.Suggestion.IsRadialFloatReferenceCandidate)
             {
-                text = "スライダー候補";
-                color = new Color(0.45f, 0.78f, 0.95f, 1f);
+                if (EnvironmentCapabilities.HasVrcSdk3106)
+                {
+                    text = "スライダー候補";
+                    color = new Color(0.45f, 0.78f, 0.95f, 1f);
+                }
+                else
+                {
+                    text = "スライダー候補 (SDK 3.10.6+)";
+                    color = new Color(0.68f, 0.74f, 0.82f, 1f);
+                }
                 return;
             }
 
@@ -1204,14 +1265,15 @@ namespace Sebanne.ExParamManager.Editor
 
             ParameterAction curAction = rule != null ? rule.action : ParameterAction.Keep;
             bool isBool = p.ValueKind == ParameterValueKind.Bool;
-            int curIndex = ActionToPopupIndex(curAction, isBool);
-            string[] labels = isBool ? BoolActionLabels : NumericActionLabels;
+            bool canSelectResize = !isBool && (EnvironmentCapabilities.HasVrcSdk3106 || curAction == ParameterAction.ResizeBitWidth);
+            int curIndex = ActionToPopupIndex(curAction, !canSelectResize);
+            string[] labels = canSelectResize ? NumericActionLabels : BoolActionLabels;
 
             EditorGUI.BeginChangeCheck();
             int nextIndex = EditorGUILayout.Popup(curIndex, labels, GUILayout.Width(colAction));
             if (EditorGUI.EndChangeCheck())
             {
-                ParameterAction nextAction = PopupIndexToAction(nextIndex, isBool);
+                ParameterAction nextAction = PopupIndexToAction(nextIndex, !canSelectResize);
                 ApplyParameterAction(comp, p, nextAction);
                 _selectedParamKey = p.EffectiveName;
             }
@@ -1300,6 +1362,11 @@ namespace Sebanne.ExParamManager.Editor
                 ParameterSnapshot p = _scanResult?.Parameters.FirstOrDefault(x => x.EffectiveName == _selectedParamKey);
                 if (p == null)
                 {
+                    if (_scanResult != null && _scanResult.Parameters.Count > 0)
+                    {
+                        EditorGUILayout.HelpBox("現在の絞り込み条件に一致するパラメータがありません（絞り込みを緩めるか「すべて」タブへ戻してください）。", MessageType.Info);
+                        EditorGUILayout.Space(4f);
+                    }
                     DrawBeginnerQuickGuide();
                     return;
                 }
@@ -1472,35 +1539,73 @@ namespace Sebanne.ExParamManager.Editor
                 ParameterAction curAction = rule != null ? rule.action : ParameterAction.Keep;
                 bool isBool = p.ValueKind == ParameterValueKind.Bool;
 
-                if (rule != null && curAction != ParameterAction.Keep)
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUI.BeginChangeCheck();
-                    bool ruleEnabled = EditorGUILayout.ToggleLeft(
-                        "削減を適用（オフで一時停止）",
-                        !rule.disabled,
-                        EditorStyles.boldLabel);
-                    if (EditorGUI.EndChangeCheck())
+                    if (rule != null && curAction != ParameterAction.Keep)
                     {
-                        ExParamManagerEditor.RecordEdit(comp, "Toggle ExParam Rule Enabled");
-                        rule.disabled = !ruleEnabled;
+                        EditorGUI.BeginChangeCheck();
+                        bool ruleEnabled = EditorGUILayout.ToggleLeft(
+                            "削減を適用（オフで一時停止）",
+                            !rule.disabled,
+                            EditorStyles.boldLabel);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            ExParamManagerEditor.RecordEdit(comp, "Toggle ExParam Rule Enabled");
+                            rule.disabled = !ruleEnabled;
+                        }
                     }
+                    else
+                    {
+                        EditorGUILayout.LabelField("削減方法を選ぶ", EditorStyles.boldLabel);
+                    }
+
+                    Color prevGuideBg = GUI.backgroundColor;
+                    if (_showActionGuide)
+                    {
+                        GUI.backgroundColor = new Color(0.38f, 0.62f, 0.90f, 1f);
+                    }
+                    if (GUILayout.Button(new GUIContent("？ 方法の違い", "選ぶ前に各方法の影響・実験の意味・戻し方を確認"), EditorStyles.miniButton, GUILayout.Width(84f), GUILayout.Height(18f)))
+                    {
+                        _showActionGuide = !_showActionGuide;
+                    }
+                    GUI.backgroundColor = prevGuideBg;
                 }
-                else
+
+                if (_showActionGuide)
                 {
-                    EditorGUILayout.LabelField("削減方法を選ぶ", EditorStyles.boldLabel);
+                    EditorGUILayout.HelpBox(
+                        "各方法の違い（選んだだけではアップロードされません）:\n"
+                        + "・そのまま: 変更しません。迷ったらこのままが安全です。\n"
+                        + "・削除 (0b): 使わない衣装・ギミック向け。ビルド時にパラメータを消し、専用メニューも隠します（状態保存 Saved は外れます）。\n"
+                        + "・自分だけ (0b): 自分の画面では動きますが、他のプレイヤーからは見えなくなります。\n"
+                        + "・bit縮小 (実験): SDK 3.10.6 以降で消費 bit を 2〜8 bit に減らします。「実験」は VRChat の 2 クライアント間同期が未検証のためです。\n"
+                        + "・戻し方: シーンのアバターに設定用コンポーネントを追加します。元の設定アセットは変更しないため、コンポーネントを外して再アップロードすれば元に戻せます。",
+                        MessageType.Info);
                 }
+
+                bool canResizeBitWidth = !isBool && EnvironmentCapabilities.HasVrcSdk3106;
+                string keepTip = "変更せず現在のままビルドします（迷ったらこのままが安全です）";
+                string removeTip = "ビルド時にパラメータを消し、専用メニュー項目も隠します（状態保存 Saved も外れます）";
+                string localTip = "自分の画面では動きますが、他プレイヤーには同期されません（自分専用設定向け）";
+                string resizeLabel = canResizeBitWidth ? "bit縮小 (実験)" : "bit縮小 (3.10.6+)";
+                string resizeTip = canResizeBitWidth
+                    ? "Int/Float を 2〜8 bit に縮小します（VRChat の2クライアント間同期は未検証の実験的機能です）"
+                    : "VRChat SDK 3.10.6 以降で利用可能です（現在 3.10.5 以下のため節約 0 bit）";
 
                 // 大きめ切替ボタン行（狭幅時は 2×2 折り返し）
                 if (!narrowDetail)
                 {
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        DrawActionChoiceButton(comp, p, ParameterAction.Keep, curAction, "そのまま", new Color(0.50f, 0.55f, 0.62f, 1f));
-                        DrawActionChoiceButton(comp, p, ParameterAction.Remove, curAction, "削除 (0b)", new Color(0.85f, 0.35f, 0.35f, 1f));
-                        DrawActionChoiceButton(comp, p, ParameterAction.MakeLocal, curAction, "自分だけ (0b)", new Color(0.32f, 0.62f, 0.92f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.Keep, curAction, "そのまま", keepTip, new Color(0.50f, 0.55f, 0.62f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.Remove, curAction, "削除 (0b)", removeTip, new Color(0.85f, 0.35f, 0.35f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.MakeLocal, curAction, "自分だけ (0b)", localTip, new Color(0.32f, 0.62f, 0.92f, 1f));
                         if (!isBool)
                         {
-                            DrawActionChoiceButton(comp, p, ParameterAction.ResizeBitWidth, curAction, "bit縮小 (実験)", new Color(0.90f, 0.65f, 0.22f, 1f));
+                            using (new EditorGUI.DisabledScope(!canResizeBitWidth && curAction != ParameterAction.ResizeBitWidth))
+                            {
+                                DrawActionChoiceButton(comp, p, ParameterAction.ResizeBitWidth, curAction, resizeLabel, resizeTip, new Color(0.90f, 0.65f, 0.22f, 1f));
+                            }
                         }
                     }
                 }
@@ -1508,15 +1613,18 @@ namespace Sebanne.ExParamManager.Editor
                 {
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        DrawActionChoiceButton(comp, p, ParameterAction.Keep, curAction, "そのまま", new Color(0.50f, 0.55f, 0.62f, 1f));
-                        DrawActionChoiceButton(comp, p, ParameterAction.Remove, curAction, "削除 (0b)", new Color(0.85f, 0.35f, 0.35f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.Keep, curAction, "そのまま", keepTip, new Color(0.50f, 0.55f, 0.62f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.Remove, curAction, "削除 (0b)", removeTip, new Color(0.85f, 0.35f, 0.35f, 1f));
                     }
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        DrawActionChoiceButton(comp, p, ParameterAction.MakeLocal, curAction, "自分だけ (0b)", new Color(0.32f, 0.62f, 0.92f, 1f));
+                        DrawActionChoiceButton(comp, p, ParameterAction.MakeLocal, curAction, "自分だけ (0b)", localTip, new Color(0.32f, 0.62f, 0.92f, 1f));
                         if (!isBool)
                         {
-                            DrawActionChoiceButton(comp, p, ParameterAction.ResizeBitWidth, curAction, "bit縮小 (実験)", new Color(0.90f, 0.65f, 0.22f, 1f));
+                            using (new EditorGUI.DisabledScope(!canResizeBitWidth && curAction != ParameterAction.ResizeBitWidth))
+                            {
+                                DrawActionChoiceButton(comp, p, ParameterAction.ResizeBitWidth, curAction, resizeLabel, resizeTip, new Color(0.90f, 0.65f, 0.22f, 1f));
+                            }
                         }
                     }
                 }
@@ -1578,7 +1686,7 @@ namespace Sebanne.ExParamManager.Editor
                         ? $"\n・状態保存(Saved)は外れ、初期値 ({p.DefaultValue}) が Animator へ引き継がれます。"
                         : string.Empty;
                     EditorGUILayout.HelpBox(
-                        $"使わない衣装・ギミックの整理向けです。元のアバター・アセットは変わりません。{savedLine}",
+                        $"使わない衣装・ギミックの整理向けです。元の設定アセットは変更されません。{savedLine}",
                         MessageType.Info);
                     break;
                 }
@@ -1591,7 +1699,7 @@ namespace Sebanne.ExParamManager.Editor
                     EditorGUILayout.HelpBox(
                         EnvironmentCapabilities.HasVrcSdk3106
                             ? "※ VRChat の2クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。"
-                            : "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小はスキップされます。",
+                            : "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小はスキップされます（節約 0 bit）。",
                         MessageType.Warning);
                     break;
             }
@@ -1603,6 +1711,7 @@ namespace Sebanne.ExParamManager.Editor
             ParameterAction buttonAction,
             ParameterAction curAction,
             string label,
+            string tooltip,
             Color activeColor)
         {
             bool isActive = curAction == buttonAction;
@@ -1612,7 +1721,7 @@ namespace Sebanne.ExParamManager.Editor
                 GUI.backgroundColor = activeColor;
             }
 
-            if (GUILayout.Button(label, GUILayout.Height(24f)))
+            if (GUILayout.Button(new GUIContent(label, tooltip), GUILayout.Height(24f)))
             {
                 ApplyParameterAction(comp, p, buttonAction);
             }
@@ -1672,6 +1781,12 @@ namespace Sebanne.ExParamManager.Editor
 
                 BitBarDrawer.DrawParameterBitBar(beforeBit, afterBit, maxScaleBit, isPaused);
 
+                if (!p.IsSynced)
+                {
+                    EditorGUILayout.Space(2f);
+                    EditorGUILayout.HelpBox("非同期パラメータ（0 bit）のため、削除しても同期 bit は減りません（一覧整理向け）。", MessageType.None);
+                }
+
                 if (_scanResult != null)
                 {
                     EditorGUILayout.Space(6f);
@@ -1701,8 +1816,12 @@ namespace Sebanne.ExParamManager.Editor
         {
             if (p.Suggestion.HasStrictIntRecommendation)
             {
-                string msg = $"縮小おすすめ: このアバターでは値 {p.Suggestion.ObservedMinInt}〜{p.Suggestion.ObservedMaxInt} しか使っていないため "
-                    + $"{p.Suggestion.RecommendedIntBitWidth} bit で足ります（-{p.Suggestion.IntBitSavings} bit 節約）。";
+                string sdkNote = EnvironmentCapabilities.HasVrcSdk3106
+                    ? string.Empty
+                    : "\n※ 現在の VRChat SDK（3.10.5 以下）では bit 縮小が使えないため、この環境での節約は 0 bit です（削除・自分だけは利用できます）。";
+                string msg = $"縮小候補: 検出できたメニュー・Animator 条件・初期値の範囲は {p.Suggestion.ObservedMinInt}〜{p.Suggestion.ObservedMaxInt} のため、"
+                    + $"{p.Suggestion.RecommendedIntBitWidth} bit で足りる見込みです（-{p.Suggestion.IntBitSavings} bit 節約見込み）。"
+                    + $"※ VRCFury や OSC 等からの直接指定がないかだけご確認ください。{sdkNote}";
                 EditorGUILayout.HelpBox(msg, MessageType.Info);
                 if (EnvironmentCapabilities.HasVrcSdk3106)
                 {
@@ -1724,9 +1843,12 @@ namespace Sebanne.ExParamManager.Editor
 
         private void DrawFloatSuggestionBox(ExParamManagerComponent comp, ParameterSnapshot p)
         {
+            string sdkNote = EnvironmentCapabilities.HasVrcSdk3106
+                ? string.Empty
+                : "\n※ 現在の VRChat SDK（3.10.5 以下）では bit 縮小が使えないため、この環境での節約は 0 bit です（削除・自分だけは利用できます）。";
             EditorGUILayout.HelpBox(
-                $"スライダー縮小候補: スライダー（Radial Puppet）専用の Float です。\n"
-                + $"4 bit 化（16段階）で -{p.Suggestion.RadialFloat4BitSavings} bit、5 bit 化（32段階）で -{p.Suggestion.RadialFloat5BitSavings} bit 削減できます。",
+                $"スライダー縮小候補: 検出できたメニュー上ではスライダー（Radial Puppet）専用の Float です。\n"
+                + $"4 bit 化（16段階）で -{p.Suggestion.RadialFloat4BitSavings} bit、5 bit 化（32段階）で -{p.Suggestion.RadialFloat5BitSavings} bit 節約できる見込みです。{sdkNote}",
                 MessageType.Info);
 
             if (EnvironmentCapabilities.HasVrcSdk3106)
@@ -2185,24 +2307,24 @@ namespace Sebanne.ExParamManager.Editor
             return count;
         }
 
-        private static int ActionToPopupIndex(ParameterAction action, bool isBool)
+        private static int ActionToPopupIndex(ParameterAction action, bool hideResizeOption)
         {
             switch (action)
             {
                 case ParameterAction.Remove: return 1;
                 case ParameterAction.MakeLocal: return 2;
-                case ParameterAction.ResizeBitWidth: return isBool ? 0 : 3;
+                case ParameterAction.ResizeBitWidth: return hideResizeOption ? 0 : 3;
                 default: return 0;
             }
         }
 
-        private static ParameterAction PopupIndexToAction(int index, bool isBool)
+        private static ParameterAction PopupIndexToAction(int index, bool hideResizeOption)
         {
             switch (index)
             {
                 case 1: return ParameterAction.Remove;
                 case 2: return ParameterAction.MakeLocal;
-                case 3: return isBool ? ParameterAction.Keep : ParameterAction.ResizeBitWidth;
+                case 3: return hideResizeOption ? ParameterAction.Keep : ParameterAction.ResizeBitWidth;
                 default: return ParameterAction.Keep;
             }
         }

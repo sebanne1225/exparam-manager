@@ -9,25 +9,27 @@ It visualizes Expression Parameters consumption against the 256-bit limit, trace
 
 ## 主な機能（何ができるか）
 
-- **合計 bit バー ＋ Prefab / サブツリー別 bit 集計**: 256 bit 上限に対する変更前→変更後の消費 bit をプレビューし、Prefab / サブツリー単位の消費内訳を把握できます。
+- **合計 bit バー ＋ 衣装・Prefab 別 色分け割合バー／等幅グリッド**: 256 bit 上限に対する変更前→変更後の消費 bit をプレビューし、色分け割合バーと等幅グリッド（`Hierarchy順` / `消費bit順` 切替・クリックで絞り込み＆Hierarchy 表示）で消費内訳を把握できます。
 - **パラメータ逆引き（4 面スキャン）**:
   - **メニュー**: Extract Menu 済みの `MA Menu Group` / `MA Menu Item` は対象 GameObject 参照、未実行の場合は `VRCExpressionsMenu` アセット参照を表示します。
   - **Animator（5 か所）**: `Transition Conditions` / `AnyState Transitions` / `BlendTree` 再帰 / `State` の有効な `*ParameterActive` / `VRCAvatarParameterDriver`（`Copy` 元 `sourceParam` 含む）を走査します（`AnimatorOverrideController` 対応）。
   - **VRChat コンポーネント**: `VRCPhysBone`（派生 5 サフィックス `_IsGrabbed`, `_IsPosed`, `_Angle`, `_Stretch`, `_Squish` 完全一致）と `VRCContactReceiver` の参照を検出します。
   - **Modular Avatar 連携**: スコープ解決（`GetParameterRemappingsAt`）および MA Reactive 系コンポーネント（`ObjectToggle` / `ShapeChanger` / `MaterialSetter`）の参照を検出します。
 - **非破壊の削減操作 3 種（NDMF コンポーネント方式）**:
-  - **削除（`Remove`）**: ビルド時にパラメータを除去し、最終 `defaultValue` を Playable Layer 初期値へ非破壊で書き戻します。専用メニュー項目も既定でビルド時非表示にし、今回の除去で空になった SubMenu は自動で隠します（元から空の SubMenu は残します）。
-  - **非同期化（`MakeLocal`）**: `networkSynced = false` に変更して 0 bit 化します。
-  - **bit 幅縮小（`ResizeBitWidth`・実験的機能・SDK 3.10.6 以降）**: Int / Float を 2〜8 bit へ縮小し、`flippedRepresentation` に合わせた `defaultValue` クランプを行います（※ VRChat 2 クライアント間の同期挙動は未検証の実験的機能です）。
+  - **削除 (0b)（`Remove`）**: ビルド時にパラメータを除去し、最終 `defaultValue` を Playable Layer 初期値へ非破壊で書き戻します。専用メニュー項目も既定でビルド時非表示にし、今回の除去で空になった SubMenu は自動で隠します（元から空の SubMenu は残します）。
+  - **自分だけ (0b)（`MakeLocal`）**: `networkSynced = false` に変更して 0 bit 化します（自分の画面では動き、他プレイヤーには同期しません）。
+  - **bit縮小 (実験)（`ResizeBitWidth`・SDK 3.10.6 以降）**: Int / Float を 2〜8 bit へ縮小し、`flippedRepresentation` に合わせた `defaultValue` クランプを行います（※ VRChat 2 クライアント間の同期挙動は未検証の実験的機能です）。
 - **安全側の自動提案・保護警告**:
-  - 厳格条件を満たす Int の推奨 bit 幅バッジ（`StrictIntRecommended`）、Radial Puppet 専用 Float の参考フィルタ（`RadialFloatReference`）、未使用候補（`UnusedCandidate`）、保護警告フラグ（`BuiltIn`, `SdkDefaultTemplate`, `ExternalPluginManaged`, `HasParameterDriverWrite`, `HasPhysBoneOrContact`, `UsedInMultiAxisControl`, `InternalParameter`, `ExternalInputSuspected`）を表示します。
+  - タブ `減らせそう`（厳格条件を満たす Int の推奨 bit 幅バッジ / Radial Puppet 専用 Float 参考候補）・`未使用かも`・`変更あり`・`注意あり`（`BuiltIn`, `SdkDefaultTemplate`, `ExternalPluginManaged`, `HasParameterDriverWrite`, `HasPhysBoneOrContact`, `UsedInMultiAxisControl`, `InternalParameter`, `ExternalInputSuspected`）を表示します。
+- **レスポンシブウィンドウ（最小 `420×420`）**: 広いウィンドウでは左右 2 ペイン（縦スプリッター付き）、幅 `740px` 未満では上下 2 段（上: 一覧 / 下: 詳細、横スプリッター付き）へ自動切替します。
 - **NDMF Build Console 出力**: ビルド時に適用サマリ（bit 変化・各操作件数）、不完全になったマルチ軸メニュー警告、256 bit 超過時のエラー／警告を NDMF Build Console へ出力します。
 
 ## 非破壊の仕組み（2 パス NDMF ビルド）
 
+- **シーン上の設定追加と元アセットの保護**: 編集開始時にシーンのアバターへ `ExParamManagerComponent` を追加します（元の `VRCExpressionParameters` / `VRCExpressionsMenu` / `AnimatorController` アセットは一切変更しません）。
 - **Pass 1（`Transforming`）**: コンポーネントの設定・ルールおよび `ModularAvatarSyncParameterSequence` の有無を `BuildState` へ退避します。
-- **Pass 2（`Optimizing`）**: 元の `VRCExpressionParameters` / `VRCExpressionsMenu` / `AnimatorController` アセットを直接書き換えず、一時クローンを作成して `ObjectRegistry.RegisterReplacedObject` で差し替えます（変更 0 件のメニューは複製しません）。
-- **自動除外と復旧**: `ExParamManagerComponent` は `INDMFEditorOnly`（NDMF 1.5.4 互換環境では `IEditorOnly`）を実装しており、ビルド時に自動除外されます。コンポーネントを外すだけで元の状態に完全に復元できます。
+- **Pass 2（`Optimizing`）**: 一時クローンを作成して `ObjectRegistry.RegisterReplacedObject` で差し替えます（変更 0 件のメニューは複製しません）。
+- **自動除外と復旧**: `ExParamManagerComponent` は `INDMFEditorOnly`（NDMF 1.5.4 互換環境では `IEditorOnly`）を実装しており、ビルド時に自動除外されます。コンポーネントを外して再アップロードすれば元の状態に戻せます。
 
 ## スクリーンショット
 
@@ -63,11 +65,15 @@ It visualizes Expression Parameters consumption against the 256-bit limit, trace
 
 ## 使い方
 
-1. アバター（アバタールート推奨）に `Add Component` → `ExParam Manager/ExParam Manager` を追加します（またはメニューバー `Tools/Sebanne/ExParam Manager` を開いて「ルートに追加」ボタンからも追加できます）。
-2. Inspector の「ExParam Manager ウィンドウを開く」またはメニューバー `Tools/Sebanne/ExParam Manager` から専用ウィンドウを開きます。
-3. 検索・型フィルタ・状態フィルタ（`StrictIntRecommended` / `RadialFloatReference` / `UnusedCandidate` / `Protected` 等）・Prefab 集計チップを使って、パラメータ一覧と右パネルの逆引き参照を確認します。
-4. 各行の操作（`Keep` / `Remove` / `MakeLocal` / `ResizeBitWidth`）や、右パネルの推奨適用ボタン・個別設定（「専用メニュー項目も隠す」「目標 bit 幅（実験）」）を設定します。
-5. 通常通りビルド／アップロードすると NDMF が非破壊で適用し、NDMF Build Console に結果サマリを出力します。
+1. メニューバー `Tools/Sebanne/ExParam Manager`（またはアバタールートの `Add Component` → `ExParam Manager/ExParam Manager`）からウィンドウを開き、閲覧モードの場合は「ExParam Manager を追加して編集を始める」を押します。
+2. まずは上部の同期 bit バーと「衣装・Prefab 別」の色分け割合バー（`Hierarchy順` / `消費bit順` 切替可）で、どの衣装・ギミックが何 bit 使っているかを把握します。
+3. **初見・安全確認の進め方**:
+   - クイックタブ **`減らせそう`**（および **`未使用かも`**）を開き、一覧から候補を選びます。
+   - 詳細パネルの「パラメーターを見る」「メニューを見る」「どこで使われているか」や保護注意理由を確認し、用途・他人への見え方（`[？ 方法の違い]` で確認可）に納得できたものだけ操作を選びます。
+   - **判断に迷う項目や影響が不明な項目は `そのまま` にしておくのが安全**です。
+   - ※ `VRChat SDK 3.10.5` 以下の環境では **`bit縮小`** は利用できないため、削減は **`削除 (0b)`** または **`自分だけ (0b)`** から選びます。
+4. ウィンドウ幅を狭めると左右 2 ペインから上下 2 段（上: 一覧 / 下: 詳細）へ自動で切り替わるため、Inspector 横など狭い場所でもそのまま操作できます。
+5. 通常通りビルド／アップロードすると NDMF が非破壊で適用し、NDMF Build Console に結果サマリを出力します（元に戻したい時はコンポーネントを外して再アップロードしてください）。
 
 ## 制限事項
 
