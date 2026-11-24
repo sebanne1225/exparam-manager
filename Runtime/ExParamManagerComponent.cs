@@ -1,16 +1,26 @@
 using System.Collections.Generic;
+#if HAS_NDMF_EDITOR_ONLY
 using nadena.dev.ndmf;
+#endif
+#if HAS_VRCSDK_BASE
+using VRC.SDKBase;
+#endif
 using UnityEngine;
 
 namespace Sebanne.ExParamManager
 {
     /// <summary>
     /// アバターに 1 つ配置する ExParam Manager の非破壊設定コンポーネント。
-    /// <see cref="INDMFEditorOnly"/> 実装により、ビルド時・アップロード検証対象から自動除外される。
+    /// エディタ専用コンポーネント（IEditorOnly / INDMFEditorOnly）として、ビルド時・アップロード検証対象から自動除外される。
     /// </summary>
     [AddComponentMenu("ExParam Manager/ExParam Manager")]
     [DisallowMultipleComponent]
-    public sealed class ExParamManagerComponent : MonoBehaviour, INDMFEditorOnly
+    public sealed class ExParamManagerComponent : MonoBehaviour
+#if HAS_NDMF_EDITOR_ONLY
+        , INDMFEditorOnly
+#elif HAS_VRCSDK_BASE
+        , IEditorOnly
+#endif
     {
         public bool enabledOnBuild = true;
         public bool pruneEmptySubMenus = true;

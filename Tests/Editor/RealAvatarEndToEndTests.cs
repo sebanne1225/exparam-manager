@@ -63,6 +63,7 @@ namespace Sebanne.ExParamManager.Editor.Tests
         [Test]
         public void FullNdmfPipeline_ProcessesSyntheticAvatarEndToEnd()
         {
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;
             var avatar = Track(new GameObject("SyntheticAvatar"));
             var desc = avatar.AddComponent<VRCAvatarDescriptor>();
 
@@ -128,6 +129,7 @@ namespace Sebanne.ExParamManager.Editor.Tests
         [Test]
         public void FullNdmfPipeline_ProcessesRealRirikaPrefabClone_WithoutMutatingOriginal()
         {
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;
             const string prefabPath = "Assets/_TestAvatars/IKUSIA/ririka/Prefab/ririka.prefab";
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefab == null)

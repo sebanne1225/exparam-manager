@@ -13,7 +13,9 @@ namespace Sebanne.ExParamManager.Editor.Tests
         {
             var type = typeof(ExParamManagerComponent);
 
+#if HAS_NDMF_EDITOR_ONLY
             Assert.IsTrue(typeof(INDMFEditorOnly).IsAssignableFrom(type));
+#endif
             Assert.IsTrue(typeof(IEditorOnly).IsAssignableFrom(type));
             Assert.IsNotNull(type.GetCustomAttribute<DisallowMultipleComponent>());
 
