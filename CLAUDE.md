@@ -4,8 +4,9 @@ VRChat アバターの 256 bit 同期パラメータ（`VRCExpressionParameters`
 
 ## Current State
 
-- **T0 完了（2026-11-24）**: テンプレートからの初期骨組み作成・`.gitignore`（`/[Ll]ibrary/`）修正・4 `.asmdef` 構成と設計書 `plan.md` v2 の紐付けまで完了。C# 本体実装はこれから（T0.5 多アバター横断観測 → T1〜T6）。
-- **公開状態**: ローカル repo のみ（GitHub private repo 作成・初回 push は初版動作確認後にせ承認で実施）。
+- **T0〜T7 完了（v0.1.0 実装・ドキュメント整備・Public 公開版）**: 4 `.asmdef` 分離・Runtime・解析/逆引きコア・安全提案・NDMF 2 パスビルド・Inspector/EditorWindow UI・EditMode テスト・README/CHANGELOG/BOOTH_PACKAGE 整備まで完了。
+- **検証状態**: 3 環境（SDK 3.10.6 / NDMF 1.15.1、SDK 3.10.5 / NDMF 1.14.8、SDK 3.7.1 / NDMF 1.5.4 / MA 1.10.3）で EditMode テスト全 PASS 確認済み。
+- **公開状態**: GitHub Public リポジトリ（`https://github.com/sebanne1225/exparam-manager`）公開済み。
 
 ## Current Blocker
 
@@ -13,30 +14,31 @@ VRChat アバターの 256 bit 同期パラメータ（`VRCExpressionParameters`
 
 ## Tasks
 
-- T0.5: 手元複数アバター（10〜20 体）のパラメータ横断統計観測（read-only YAML）
-- T1〜T6: 4 `.asmdef`・Runtime・解析コア・安全提案・NDMF 2 パス・UI・NUnit/実機検証
+- v0.1.0 GitHub Release タグ作成・`sebanne-listing` への登録
+- Unity Editor 実画面での GUI 目視確認・スクリーンショット追加
+- v1.1 候補: MA `internalParameter` の変更操作対応、VRChat 2 クライアント間での可変 `bitWidth` 同期実機確認
 
 ## Rules
 
 - 非破壊を最優先にし、元アセット（`ExpressionParameters` / `VRCExpressionsMenu` / `AnimatorController`）を直接書き換えず一時クローン ＋ `ObjectRegistry.RegisterReplacedObject` で差し替える
 - `Editor/Sebanne.ExParamManager.Editor.asmdef` から Modular Avatar を直接参照しない（`IMaAdapter` ＋ `Editor/ModularAvatar/` 分離で `TD-T39` 型コンパイル不能を防ぐ）
-- `HAS_VRCSDK3_AVATARS_3_10_6` と `HAS_NDMF_1_15` の 2 本の `versionDefines` で SDK 3.10.5 以下と 3.10.6 以降を両対応にする
+- `HAS_VRCSDK3_AVATARS_3_10_6` / `HAS_NDMF_1_15` / `HAS_NDMF_EDITOR_ONLY` / `HAS_VRCSDK_BASE` により SDK 3.10.5 以下・3.10.6 以降・NDMF 1.5.4+ を両対応にする
 
 ## ファイル構成
 
-- `Runtime/Sebanne.ExParamManager.asmdef` — `ExParamManagerComponent`（`INDMFEditorOnly`）配置予定
+- `Runtime/Sebanne.ExParamManager.asmdef` — `ExParamManagerComponent`, `ParameterRule`, `ParameterAction`
 - `Editor/Sebanne.ExParamManager.Editor.asmdef` — 解析・逆引き・安全提案・NDMF 2 パス・UI（MA 非依存）
-- `Editor/ModularAvatar/Sebanne.ExParamManager.Editor.ModularAvatar.asmdef` — MA `>= 1.11.2` 任意アダプタ（今後追加予定）
-- `Tests/Editor/Sebanne.ExParamManager.Editor.Tests.asmdef` — EditMode NUnit テスト（今後追加予定）
+- `Editor/ModularAvatar/Sebanne.ExParamManager.Editor.ModularAvatar.asmdef` — MA `>= 1.11.2` 任意アダプタ
+- `Tests/Editor/Sebanne.ExParamManager.Editor.Tests.asmdef` — EditMode NUnit テスト（および `Tests/Editor/ModularAvatar/`）
 - 設計書・KB 仕事棚（正本）:
   - `Repos/sebanne-dev-knowledge-base/notes/artifacts/exparam-manager/INDEX.md`
   - `Repos/sebanne-dev-knowledge-base/notes/artifacts/exparam-manager/plans/first-loop/plan.md`
 
 ## 次回再開用の要点
 
-1. まず `T0.5` として手元複数アバター（10〜20 体）の Expression Parameters / MA Parameters を横断集計し、Float Radial や保護プレフィックス分布を確かめる。
-2. `T1` で 4 `.asmdef` と `ExParamManagerComponent`（`Component` 直接参照主キー）を実装する。
-3. 2 環境検証先は最新 SDK `3.10.6`（`ToolDevWorkspace` / `AFKkip`）と旧 SDK `3.10.5`（`Kaguya` / `Chiffon` 等）。
+1. v0.1.0 の GitHub Release 公開（タグ `0.1.0`）と `sebanne-listing` 登録を進める。
+2. Unity Editor 上での実画面目視確認・スクリーンショット撮影（`Documentation~/images/`）を行う。
+3. v1.1 以降は `internalParameter` の変更操作解禁と VRChat 2 クライアント間 `ResizeBitWidth` 実機確認を検討する。
 
 ## 技術知見（任意）
 

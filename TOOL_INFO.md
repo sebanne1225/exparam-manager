@@ -9,6 +9,7 @@
 - 表示名: `ExParam Manager`
 - Runtime asmdef: `Sebanne.ExParamManager`
 - Editor asmdef: `Sebanne.ExParamManager.Editor`
+- Optional MA asmdef: `Sebanne.ExParamManager.Editor.ModularAvatar`
 - 現在 version: `0.1.0`
 
 ## 公開メタ情報
@@ -26,7 +27,7 @@
 - VRChat アバターの Expression Parameters 可視化・Prefab 別 bit 集計
 - メニュー（Extract Menu 済み GameObject 直接ジャンプ / 未実行アセット両対応）・Animator 5 か所・Driver・PhysBone・Contact・MA Reactive 逆引き
 - NDMF 非破壊 2 パス方式による削除（`defaultValue` 書き戻し＋メニュー項目非表示）・非同期化・可変 bit 幅縮小（実験的機能ラベル付き）
-- VRChat SDK `3.10.5` 以下と `3.10.6` 以降の両対応、Modular Avatar `>= 1.11.2` 任意分離
+- VRChat SDK `3.10.5` 以下と `3.10.6` 以降の両対応、NDMF `>= 1.5.4` 対応、Modular Avatar `>= 1.11.2` 任意分離
 
 ## 導入導線の前提
 

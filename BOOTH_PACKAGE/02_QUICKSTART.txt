@@ -2,9 +2,17 @@ ExParam Manager
 クイックスタート
 
 最短手順:
-（ツール固有の手順をここに書く。3〜6 ステップ程度）
+1. アバター（アバタールート推奨）の Inspector で Add Component から
+   ExParam Manager/ExParam Manager を追加します
+   （Tools/Sebanne/ExParam Manager を開いて「ルートに追加」からも追加できます）
+2. Inspector の「ExParam Manager ウィンドウを開く」から管理ウィンドウを開きます
+3. 合計 bit バー・Prefab 別集計・逆引き参照（メニュー / Animator / Driver / PhysBone 等）を確認します
+4. 各パラメータの操作（Keep / Remove / MakeLocal / ResizeBitWidth）を設定します
+5. 通常通りアバターをビルド／アップロードすると、NDMF が非破壊で適用し、
+   NDMF Build Console に結果サマリを出力します
 
 補足:
-- このツールは非破壊で動作し、元のアバターには直接変更を加えません
-- （ツール固有の補足をここに追加する）
-- 詳しい制限事項は README を確認してください
+- このツールは非破壊で動作し、元のアバターや元アセットには直接変更を加えません
+- コンポーネント自体はビルド時に自動除外され、外すだけで元の状態に戻せます
+- bit 幅縮小（ResizeBitWidth・2〜8 bit）は VRChat SDK 3.10.6 以降で有効な実験的機能です
+- 詳しい制限事項や対応環境は README を確認してください
