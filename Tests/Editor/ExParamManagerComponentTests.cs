@@ -112,6 +112,39 @@ namespace Sebanne.ExParamManager.Editor.Tests
         }
 
         [Test]
+        public void FindRule_DoesNotCollideAcrossDifferentParameters_OnSameSourceComponent()
+        {
+            var root = new GameObject("AvatarRoot");
+            try
+            {
+                var comp = root.AddComponent<ExParamManagerComponent>();
+                ParameterRule breastRule = comp.GetOrCreateRule("Breast_Size", root.transform);
+                breastRule.action = ParameterAction.Remove;
+
+                // 同じ sourceComponent を持つ別パラメータは null を返さなければならない
+                Assert.IsNull(comp.FindRule("FacialSet", root.transform));
+                Assert.IsNull(comp.FindRule("Apron_Ribbon", root.transform));
+                Assert.AreSame(breastRule, comp.FindRule("Breast_Size", root.transform));
+
+                ParameterRule facialRule = comp.GetOrCreateRule("FacialSet", root.transform);
+                facialRule.action = ParameterAction.ResizeBitWidth;
+                facialRule.targetBitWidth = 2;
+
+                Assert.AreSame(breastRule, comp.FindRule("Breast_Size", root.transform));
+                Assert.AreSame(facialRule, comp.FindRule("FacialSet", root.transform));
+                Assert.IsNull(comp.FindRule("Apron_Ribbon", root.transform));
+
+                Assert.IsTrue(comp.RemoveRule("Breast_Size", root.transform));
+                Assert.IsNull(comp.FindRule("Breast_Size", root.transform));
+                Assert.AreSame(facialRule, comp.FindRule("FacialSet", root.transform));
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
         public void MaAdapter_AutoRegisters_AndDetectsSyncSequence_FalseOnEmptyObject()
         {
 #if HAS_MODULAR_AVATAR

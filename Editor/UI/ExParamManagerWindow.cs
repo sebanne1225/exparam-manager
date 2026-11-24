@@ -1,54 +1,85 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
+using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace Sebanne.ExParamManager.Editor
 {
     public sealed class ExParamManagerWindow : EditorWindow
     {
-        private enum StateFilter
+        private enum QuickFilterTab
         {
             All = 0,
-            HasRule = 1,
-            StrictIntRecommended = 2,
-            RadialFloatReference = 3,
-            UnusedCandidate = 4,
-            Protected = 5,
-            InternalReadOnly = 6,
+            Reducible = 1,
+            UnusedCandidate = 2,
+            ChangedOnly = 3,
+            Protected = 4,
         }
+
+        private const double AutoRescanDebounceSeconds = 0.35;
+        private const double AutoRescanDisableThresholdMs = 400.0;
+
+        private const float ColWidthType = 42f;
+        private const float ColWidthBit = 54f;
+        private const float ColWidthStatus = 96f;
+        private const float ColWidthAction = 116f;
+
+        private static readonly string[] TypeFilterLabels = { "全型", "Float (8b)", "Int (8b)", "Bool (1b)" };
+        private static readonly string[] SortModeLabels = { "消費bitが大きい順", "名前順", "参照が少ない順", "型順" };
+        private static readonly string[] BoolActionLabels = { "そのまま", "削除 (0b)", "自分だけ (0b)" };
+        private static readonly string[] NumericActionLabels = { "そのまま", "削除 (0b)", "自分だけ (0b)", "bit縮小 (実験)" };
 
         private VRCAvatarDescriptor _targetAvatar;
         private AvatarScanResult _scanResult;
-        private bool _needsRescan;
+
+        private bool _autoRescanPending;
+        private double _autoRescanAt;
+        private double _lastScanDurationMs;
+        private bool _autoRescanDisabledForPerformance;
+        private bool _needsManualRescan;
+        private bool _showTechNotes;
+
         private string _searchText = string.Empty;
-        private int _typeFilterIndex; // 0=All, 1=Int, 2=Float, 3=Bool
-        private StateFilter _stateFilter = StateFilter.All;
-        private ParameterSortMode _sortMode = ParameterSortMode.BitCostDescending;
+        private int _typeFilterIndex;
+        private QuickFilterTab _quickTab = QuickFilterTab.All;
+        private int _sortModeIndex; // 0=BitCostDesc, 1=NameAsc, 2=RefCountAsc, 3=TypeOrder
         private string _selectedPrefabGroupKey = string.Empty;
         private bool _showPrefabGroups = true;
 
         private string _selectedParamKey = string.Empty;
         private Vector2 _leftScroll;
         private Vector2 _rightScroll;
+        private readonly Dictionary<string, bool> _animatorGroupFoldouts = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+        // OnGUI 内で遅延初期化するスタイル
+        private GUIStyle _boldNameStyle;
+        private GUIStyle _subLabelStyle;
+        private GUIStyle _badgeStyle;
+        private GUIStyle _sectionHeaderStyle;
+        private GUIStyle _headerLabelStyle;
+        private GUIStyle _wrappedMiniStyle;
 
         [MenuItem("Tools/Sebanne/ExParam Manager")]
         public static void Open()
         {
             var win = GetWindow<ExParamManagerWindow>("ExParam Manager");
-            win.minSize = new Vector2(820f, 500f);
+            win.minSize = new Vector2(880f, 540f);
             win.Show();
         }
 
         public static void OpenFor(VRCAvatarDescriptor descriptor)
         {
             var win = GetWindow<ExParamManagerWindow>("ExParam Manager");
-            win.minSize = new Vector2(820f, 500f);
+            win.minSize = new Vector2(880f, 540f);
             if (descriptor != null)
             {
                 win._targetAvatar = descriptor;
+                win._selectedPrefabGroupKey = string.Empty;
+                win._selectedParamKey = string.Empty;
                 win.RunScan();
             }
             win.Show();
@@ -58,6 +89,7 @@ namespace Sebanne.ExParamManager.Editor
         {
             EditorApplication.hierarchyChanged += OnHierarchyChanged;
             Undo.undoRedoPerformed += OnUndoRedo;
+            EditorApplication.update += OnEditorUpdate;
 
             if (_targetAvatar == null)
             {
@@ -74,13 +106,38 @@ namespace Sebanne.ExParamManager.Editor
         {
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.undoRedoPerformed -= OnUndoRedo;
+            EditorApplication.update -= OnEditorUpdate;
         }
 
         private void OnHierarchyChanged()
         {
-            if (_targetAvatar != null)
+            if (_targetAvatar == null)
             {
-                _needsRescan = true;
+                return;
+            }
+
+            if (_autoRescanDisabledForPerformance)
+            {
+                _needsManualRescan = true;
+                Repaint();
+                return;
+            }
+
+            _autoRescanPending = true;
+            _autoRescanAt = EditorApplication.timeSinceStartup + AutoRescanDebounceSeconds;
+        }
+
+        private void OnEditorUpdate()
+        {
+            if (!_autoRescanPending || _targetAvatar == null)
+            {
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup >= _autoRescanAt)
+            {
+                _autoRescanPending = false;
+                RunScan();
                 Repaint();
             }
         }
@@ -96,17 +153,105 @@ namespace Sebanne.ExParamManager.Editor
 
         private void RunScan()
         {
-            _needsRescan = false;
-            _scanResult = _targetAvatar != null ? AvatarScanner.Scan(_targetAvatar) : null;
+            _autoRescanPending = false;
+            _needsManualRescan = false;
+
+            if (_targetAvatar == null)
+            {
+                _scanResult = null;
+                return;
+            }
+
+            var sw = Stopwatch.StartNew();
+            _scanResult = AvatarScanner.Scan(_targetAvatar);
+            sw.Stop();
+            _lastScanDurationMs = sw.Elapsed.TotalMilliseconds;
+
+            if (_lastScanDurationMs > AutoRescanDisableThresholdMs)
+            {
+                _autoRescanDisabledForPerformance = true;
+            }
+
+            EnsureValidSelection();
+        }
+
+        private void EnsureValidSelection()
+        {
+            if (_scanResult == null || _scanResult.Parameters.Count == 0)
+            {
+                _selectedParamKey = string.Empty;
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(_selectedParamKey) && _scanResult.Parameters.Any(p => p.EffectiveName == _selectedParamKey))
+            {
+                return;
+            }
+
+            ExParamManagerComponent comp = _targetAvatar != null
+                ? _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true)
+                : null;
+            List<ParameterSnapshot> filtered = GetFilteredAndSortedParameters(comp);
+            _selectedParamKey = filtered.Count > 0
+                ? filtered[0].EffectiveName
+                : _scanResult.Parameters[0].EffectiveName;
+        }
+
+        private void EnsureStyles()
+        {
+            if (_boldNameStyle != null)
+            {
+                return;
+            }
+
+            _boldNameStyle = new GUIStyle(EditorStyles.label)
+            {
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+            };
+
+            _subLabelStyle = new GUIStyle(EditorStyles.miniLabel)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+                normal = { textColor = new Color(0.72f, 0.72f, 0.72f, 1f) },
+            };
+
+            _badgeStyle = new GUIStyle(EditorStyles.miniLabel)
+            {
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+            };
+
+            _sectionHeaderStyle = new GUIStyle(EditorStyles.boldLabel)
+            {
+                fontSize = 13,
+            };
+
+            _headerLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleLeft,
+            };
+
+            _wrappedMiniStyle = new GUIStyle(EditorStyles.wordWrappedMiniLabel);
         }
 
         private void OnGUI()
         {
-            DrawTopBar();
+            EnsureStyles();
+
+            ExParamManagerComponent comp = _targetAvatar != null
+                ? _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true)
+                : null;
+
+            DrawTopBar(comp);
 
             if (_targetAvatar == null)
             {
-                EditorGUILayout.HelpBox("上の欄で対象の VRCAvatarDescriptor を選択してください。", MessageType.Info);
+                EditorGUILayout.HelpBox("上の「対象アバター」欄で編集・確認したいアバター（VRCAvatarDescriptor）を選択してください。", MessageType.Info);
+                DrawBeginnerQuickGuide();
                 return;
             }
 
@@ -115,7 +260,6 @@ namespace Sebanne.ExParamManager.Editor
                 RunScan();
             }
 
-            ExParamManagerComponent comp = _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true);
             DrawFilterAndPrefabSection(comp);
 
             EditorGUILayout.Space(4f);
@@ -126,7 +270,7 @@ namespace Sebanne.ExParamManager.Editor
             }
         }
 
-        private void DrawTopBar()
+        private void DrawTopBar(ExParamManagerComponent comp)
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
@@ -143,31 +287,41 @@ namespace Sebanne.ExParamManager.Editor
                         _targetAvatar = nextAvatar;
                         _selectedPrefabGroupKey = string.Empty;
                         _selectedParamKey = string.Empty;
+                        _autoRescanDisabledForPerformance = false;
                         RunScan();
                     }
 
                     Color prevBg = GUI.backgroundColor;
-                    if (_needsRescan)
+                    if (_needsManualRescan)
                     {
                         GUI.backgroundColor = new Color(1f, 0.78f, 0.25f, 1f);
                     }
 
-                    if (GUILayout.Button(_needsRescan ? "要再スキャン" : "再スキャン", GUILayout.Width(104f)))
+                    string refreshLabel = _needsManualRescan ? "更新*" : "更新";
+                    if (GUILayout.Button(refreshLabel, GUILayout.Width(64f)))
                     {
                         RunScan();
                     }
                     GUI.backgroundColor = prevBg;
+
+                    if (comp != null && CountChangedRules(comp) > 0)
+                    {
+                        if (GUILayout.Button("すべて元に戻す", GUILayout.Width(116f)))
+                        {
+                            ExParamManagerEditor.RecordEdit(comp, "Reset All ExParam Rules");
+                            comp.ClearAllRules();
+                        }
+                    }
                 }
 
                 if (_targetAvatar != null)
                 {
-                    ExParamManagerComponent comp = _targetAvatar.GetComponentInChildren<ExParamManagerComponent>(true);
                     if (comp == null)
                     {
-                        using (new EditorGUILayout.HorizontalScope())
+                        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                         {
-                            EditorGUILayout.LabelField("このアバターには ExParam Manager コンポーネントが未追加です（閲覧のみ可能）。", EditorStyles.miniLabel);
-                            if (GUILayout.Button("ルートに追加", GUILayout.Width(104f)))
+                            EditorGUILayout.LabelField("このアバターはまだ閲覧モードです。削減ルールを設定するには下のボタンを押してください（元アバターは変更されません）。", _wrappedMiniStyle);
+                            if (GUILayout.Button("ExParam Manager を追加して編集を始める", GUILayout.Height(26f)))
                             {
                                 Undo.AddComponent<ExParamManagerComponent>(_targetAvatar.gameObject);
                                 RunScan();
@@ -182,102 +336,359 @@ namespace Sebanne.ExParamManager.Editor
 
                         if (_scanResult.HasSyncParameterSequence && (comp == null || !comp.allowOverrideWithSyncSequence))
                         {
-                            EditorGUILayout.HelpBox("ModularAvatarSyncParameterSequence を検出したため、同期列変更はビルド時に安全ブロックされます。", MessageType.Warning);
+                            EditorGUILayout.HelpBox("ModularAvatarSyncParameterSequence を検出したため、同期列を変える操作はビルド時に安全ブロックされます。", MessageType.Warning);
                         }
                     }
                 }
 
-                EditorGUILayout.LabelField(
-                    EnvironmentCapabilities.HasVrcSdk3106
-                        ? "※ Edit Mode 解析のため VRCFury 等 IParameterProvider 未実装コンポーネントの動的パラメータはビルド時に加算されます。bit 幅縮小は実験的機能です。"
-                        : "※ SDK 3.10.5 以下環境のため bit 幅縮小は適用されません（可視化・逆引き・削除・非同期化のみ有効）。",
-                    EditorStyles.miniLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "非破壊で動作します：元のアバター・元アセットは変更されません。ビルド時のみ適用され、コンポーネントを外せば元に戻ります。",
+                        EditorStyles.miniLabel);
+                    if (GUILayout.Button(_showTechNotes ? "？ 閉じる" : "？ 詳しい注意", EditorStyles.miniButton, GUILayout.Width(88f)))
+                    {
+                        _showTechNotes = !_showTechNotes;
+                    }
+                }
+
+                if (_showTechNotes)
+                {
+                    string perfNote = _autoRescanDisabledForPerformance
+                        ? $"・このアバターは規模が大きいため自動更新を停止しています（前回 {_lastScanDurationMs:0}ms）。階層変更後は右上の「更新*」を押してください。\n"
+                        : string.Empty;
+
+                    string sdkNote = EnvironmentCapabilities.HasVrcSdk3106
+                        ? "・bit 幅縮小（ResizeBitWidth）は VRChat 2 クライアント間同期が未検証の実験的機能です。\n"
+                        : "・現在の SDK（3.10.5 以下）では bit 幅縮小は適用されず、削除・自分だけ（非同期化）のみ有効です。\n";
+
+                    EditorGUILayout.HelpBox(
+                        perfNote
+                        + sdkNote
+                        + "・Edit Mode 解析のため VRCFury 等 IParameterProvider 未実装コンポーネントがビルド時に追加するパラメータはビルド後に加算されます。",
+                        MessageType.Info);
+                }
             }
         }
 
         private void DrawFilterAndPrefabSection(ExParamManagerComponent comp)
         {
+            if (_scanResult == null)
+            {
+                return;
+            }
+
+            CountTabs(
+                comp,
+                out int totalCount,
+                out int reducibleCount,
+                out int unusedCount,
+                out int changedCount,
+                out int protectedCount,
+                out int unappliedStrictIntCount,
+                out int unappliedStrictIntSavings);
+
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
+                // クイック絞り込みタブ行
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    _searchText = EditorGUILayout.TextField("検索", _searchText, GUILayout.MinWidth(180f));
-                    _typeFilterIndex = EditorGUILayout.Popup(_typeFilterIndex, new[] { "全型", "Int", "Float", "Bool" }, GUILayout.Width(76f));
-                    _stateFilter = (StateFilter)EditorGUILayout.EnumPopup(_stateFilter, GUILayout.Width(160f));
-                    _sortMode = (ParameterSortMode)EditorGUILayout.EnumPopup(_sortMode, GUILayout.Width(140f));
-                }
+                    DrawQuickTabButton(QuickFilterTab.All, $"すべて ({totalCount})");
+                    DrawQuickTabButton(QuickFilterTab.Reducible, $"減らせそう ({reducibleCount})");
+                    DrawQuickTabButton(QuickFilterTab.UnusedCandidate, $"未使用かも ({unusedCount})");
+                    DrawQuickTabButton(QuickFilterTab.ChangedOnly, $"変更あり ({changedCount})");
+                    DrawQuickTabButton(QuickFilterTab.Protected, $"注意あり ({protectedCount})");
 
-                if (_scanResult != null && _scanResult.PrefabGroups.Count > 0)
-                {
-                    _showPrefabGroups = EditorGUILayout.Foldout(_showPrefabGroups, $"Prefab / サブツリー別 bit 集計（{_scanResult.PrefabGroups.Count} グループ）", true);
-                    if (_showPrefabGroups)
+                    GUILayout.FlexibleSpace();
+
+                    if (comp != null && EnvironmentCapabilities.HasVrcSdk3106 && unappliedStrictIntCount > 0)
                     {
-                        using (new EditorGUILayout.HorizontalScope())
+                        Color prev = GUI.backgroundColor;
+                        GUI.backgroundColor = new Color(0.32f, 0.72f, 0.45f, 1f);
+                        if (GUILayout.Button($"推奨の縮小をまとめて適用 (-{unappliedStrictIntSavings}b)", GUILayout.Height(20f)))
                         {
-                            if (GUILayout.Toggle(string.IsNullOrEmpty(_selectedPrefabGroupKey), "すべて", EditorStyles.miniButton, GUILayout.Width(60f)))
-                            {
-                                _selectedPrefabGroupKey = string.Empty;
-                            }
-
-                            int maxChips = Mathf.Min(_scanResult.PrefabGroups.Count, 8);
-                            for (int i = 0; i < maxChips; i++)
-                            {
-                                PrefabBitGroup g = _scanResult.PrefabGroups[i];
-                                bool active = _selectedPrefabGroupKey == g.GroupKey;
-                                string label = $"{g.DisplayName} ({g.TotalSyncedBits}b)";
-                                if (GUILayout.Toggle(active, label, EditorStyles.miniButton))
-                                {
-                                    _selectedPrefabGroupKey = g.GroupKey;
-                                }
-                            }
+                            ApplyAllStrictIntRecommendations(comp);
                         }
+                        GUI.backgroundColor = prev;
                     }
                 }
+
+                // 検索・型・並び替え行
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("検索 (名前 / メニュー名)", GUILayout.Width(134f));
+                    _searchText = EditorGUILayout.TextField(_searchText, GUILayout.MinWidth(140f));
+                    if (!string.IsNullOrEmpty(_searchText) && GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(22f)))
+                    {
+                        _searchText = string.Empty;
+                        GUI.FocusControl(null);
+                    }
+
+                    _typeFilterIndex = EditorGUILayout.Popup(_typeFilterIndex, TypeFilterLabels, GUILayout.Width(96f));
+                    _sortModeIndex = EditorGUILayout.Popup(_sortModeIndex, SortModeLabels, GUILayout.Width(138f));
+                }
+
+                // Prefab / 衣装別集計（2 グループ以上あるときのみ表示）
+                if (_scanResult.PrefabGroups.Count >= 2)
+                {
+                    _showPrefabGroups = EditorGUILayout.Foldout(_showPrefabGroups, $"衣装・Prefab 別の消費内訳（{_scanResult.PrefabGroups.Count} グループ）", true);
+                    if (_showPrefabGroups)
+                    {
+                        DrawPrefabGroupChipsWrapped();
+                    }
+                }
+            }
+        }
+
+        private void DrawQuickTabButton(QuickFilterTab tab, string label)
+        {
+            bool active = _quickTab == tab;
+            Color prev = GUI.backgroundColor;
+            if (active)
+            {
+                GUI.backgroundColor = new Color(0.38f, 0.62f, 0.90f, 1f);
+            }
+
+            if (GUILayout.Toggle(active, label, EditorStyles.miniButton, GUILayout.Height(20f)))
+            {
+                if (!active)
+                {
+                    _quickTab = tab;
+                    EnsureValidSelection();
+                }
+            }
+
+            GUI.backgroundColor = prev;
+        }
+
+        private void DrawPrefabGroupChipsWrapped()
+        {
+            const int maxPerRow = 4;
+            int col = 0;
+
+            EditorGUILayout.BeginHorizontal();
+            try
+            {
+                if (GUILayout.Toggle(string.IsNullOrEmpty(_selectedPrefabGroupKey), "すべて", EditorStyles.miniButton, GUILayout.Width(64f)))
+                {
+                    _selectedPrefabGroupKey = string.Empty;
+                }
+                col = 1;
+
+                for (int i = 0; i < _scanResult.PrefabGroups.Count; i++)
+                {
+                    if (col >= maxPerRow)
+                    {
+                        EditorGUILayout.EndHorizontal();
+                        EditorGUILayout.BeginHorizontal();
+                        col = 0;
+                    }
+
+                    PrefabBitGroup g = _scanResult.PrefabGroups[i];
+                    bool active = _selectedPrefabGroupKey == g.GroupKey;
+                    string label = $"{g.DisplayName} ({g.TotalSyncedBits}b)";
+                    if (GUILayout.Toggle(active, label, EditorStyles.miniButton))
+                    {
+                        _selectedPrefabGroupKey = g.GroupKey;
+                    }
+                    col++;
+                }
+            }
+            finally
+            {
+                EditorGUILayout.EndHorizontal();
             }
         }
 
         private void DrawLeftTable(ExParamManagerComponent comp)
         {
             List<ParameterSnapshot> filtered = GetFilteredAndSortedParameters(comp);
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(position.width * 0.56f), GUILayout.ExpandHeight(true)))
+            int total = _scanResult != null ? _scanResult.Parameters.Count : 0;
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(position.width * 0.54f), GUILayout.ExpandHeight(true)))
             {
-                EditorGUILayout.LabelField($"パラメータ一覧（{filtered.Count} 件）", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"パラメータ一覧（表示 {filtered.Count} / 全 {total} 件）", EditorStyles.boldLabel);
+
+                // 固定幅列ヘッダー
+                using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+                {
+                    GUILayout.Space(5f);
+                    GUILayout.Label("パラメータ / メニュー名", _headerLabelStyle, GUILayout.ExpandWidth(true));
+                    GUILayout.Label("型", _headerLabelStyle, GUILayout.Width(ColWidthType));
+                    GUILayout.Label("bit", _headerLabelStyle, GUILayout.Width(ColWidthBit));
+                    GUILayout.Label("状態", _headerLabelStyle, GUILayout.Width(ColWidthStatus));
+                    GUILayout.Label("ビルド時の扱い", _headerLabelStyle, GUILayout.Width(ColWidthAction));
+                }
 
                 _leftScroll = EditorGUILayout.BeginScrollView(_leftScroll);
-                for (int i = 0; i < filtered.Count; i++)
+                try
                 {
-                    ParameterSnapshot p = filtered[i];
-                    ParameterRule rule = comp != null ? comp.FindRule(p.EffectiveName, p.SourceComponent) : null;
-                    bool isSelected = _selectedParamKey == p.EffectiveName;
-
-                    using (new EditorGUILayout.HorizontalScope(isSelected ? EditorStyles.selectionRect : EditorStyles.helpBox))
+                    if (filtered.Count == 0)
                     {
-                        if (GUILayout.Button(p.EffectiveName, EditorStyles.label, GUILayout.MinWidth(130f)))
+                        EditorGUILayout.Space(8f);
+                        EditorGUILayout.HelpBox("現在の絞り込み条件に一致するパラメータがありません。", MessageType.Info);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < filtered.Count; i++)
                         {
-                            _selectedParamKey = p.EffectiveName;
+                            DrawParameterRow(comp, filtered[i]);
                         }
-
-                        GUILayout.Label(p.ValueKind.ToString(), EditorStyles.miniLabel, GUILayout.Width(40f));
-
-                        int afterBit = EstimateSingleAfterBit(p, rule);
-                        string bitText = p.EffectiveBitCost != afterBit
-                            ? $"{p.EffectiveBitCost}→{afterBit}b"
-                            : $"{p.EffectiveBitCost}b";
-                        GUILayout.Label(bitText, EditorStyles.miniLabel, GUILayout.Width(48f));
-
-                        GUILayout.Label($"参照{p.References.Count}", EditorStyles.miniLabel, GUILayout.Width(44f));
-
-                        string badge = BuildShortBadge(p);
-                        if (!string.IsNullOrEmpty(badge))
-                        {
-                            GUILayout.Label(badge, EditorStyles.miniLabel, GUILayout.Width(84f));
-                        }
-
-                        DrawInlineActionSelector(comp, p, rule);
                     }
                 }
-                EditorGUILayout.EndScrollView();
+                finally
+                {
+                    EditorGUILayout.EndScrollView();
+                }
             }
+        }
+
+        private void DrawParameterRow(ExParamManagerComponent comp, ParameterSnapshot p)
+        {
+            ParameterRule rule = comp != null ? comp.FindRule(p.EffectiveName, p.SourceComponent) : null;
+            ParameterAction curAction = rule != null ? rule.action : ParameterAction.Keep;
+            bool isSelected = _selectedParamKey == p.EffectiveName;
+
+            Rect rowRect = EditorGUILayout.BeginHorizontal(GUILayout.Height(38f));
+            try
+            {
+                if (Event.current.type == EventType.Repaint)
+                {
+                    Color bg = isSelected
+                        ? new Color(0.20f, 0.42f, 0.68f, 0.35f)
+                        : new Color(1f, 1f, 1f, 0.03f);
+                    EditorGUI.DrawRect(rowRect, bg);
+
+                    if (curAction != ParameterAction.Keep && !p.IsInternalParameter)
+                    {
+                        Color stripeColor = curAction == ParameterAction.Remove
+                            ? new Color(0.85f, 0.30f, 0.30f, 1f)
+                            : curAction == ParameterAction.MakeLocal
+                                ? new Color(0.28f, 0.58f, 0.90f, 1f)
+                                : new Color(0.90f, 0.65f, 0.20f, 1f);
+                        EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y + 2f, 3f, rowRect.height - 4f), stripeColor);
+                    }
+                }
+
+                GUILayout.Space(5f);
+
+                // 列1: パラメータ名 + メニュー名/参照サマリ
+                using (new EditorGUILayout.VerticalScope(GUILayout.ExpandWidth(true)))
+                {
+                    if (GUILayout.Button(p.EffectiveName, _boldNameStyle, GUILayout.Height(18f)))
+                    {
+                        _selectedParamKey = p.EffectiveName;
+                        GUI.FocusControl(null);
+                    }
+
+                    string subText = BuildRowSubText(p);
+                    GUILayout.Label(subText, _subLabelStyle, GUILayout.Height(14f));
+                }
+
+                // 列2: 型
+                GUILayout.Label(p.ValueKind.ToString(), EditorStyles.miniLabel, GUILayout.Width(ColWidthType), GUILayout.Height(34f));
+
+                // 列3: bit
+                int afterBit = EstimateSingleAfterBit(p, rule);
+                string bitText = p.EffectiveBitCost != afterBit
+                    ? $"{p.EffectiveBitCost}→{afterBit}b"
+                    : $"{p.EffectiveBitCost}b";
+                GUILayout.Label(bitText, EditorStyles.miniLabel, GUILayout.Width(ColWidthBit), GUILayout.Height(34f));
+
+                // 列4: 状態バッジ（固定幅を常に確保して列ズレ防止）
+                DrawRowBadge(p);
+
+                // 列5: ビルド時の扱い
+                DrawInlineActionSelector(comp, p, rule);
+            }
+            finally
+            {
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (Event.current.type == EventType.MouseDown && rowRect.Contains(Event.current.mousePosition))
+            {
+                _selectedParamKey = p.EffectiveName;
+                Repaint();
+            }
+        }
+
+        private static string BuildRowSubText(ParameterSnapshot p)
+        {
+            if (!string.IsNullOrEmpty(p.PrimaryMenuLabel))
+            {
+                return "メニュー: " + p.PrimaryMenuLabel;
+            }
+
+            if (p.References.Count == 0)
+            {
+                return "参照なし（未使用かも）";
+            }
+
+            var parts = new List<string>();
+            if (p.AnimatorRefCount > 0) parts.Add($"アニメ {p.AnimatorRefCount}");
+            if (p.DriverRefCount > 0) parts.Add($"Driver {p.DriverRefCount}");
+            if (p.DynamicsRefCount > 0) parts.Add($"PhysBone等 {p.DynamicsRefCount}");
+            if (p.ReactiveRefCount > 0) parts.Add($"MA {p.ReactiveRefCount}");
+            return parts.Count > 0
+                ? "メニューなし・" + string.Join(" / ", parts)
+                : $"参照 {p.References.Count}件";
+        }
+
+        private void DrawRowBadge(ParameterSnapshot p)
+        {
+            GetBadgeInfo(p, out string text, out Color color);
+            if (string.IsNullOrEmpty(text))
+            {
+                GUILayout.Label(string.Empty, EditorStyles.miniLabel, GUILayout.Width(ColWidthStatus), GUILayout.Height(34f));
+                return;
+            }
+
+            Color prev = _badgeStyle.normal.textColor;
+            _badgeStyle.normal.textColor = color;
+            GUILayout.Label(text, _badgeStyle, GUILayout.Width(ColWidthStatus), GUILayout.Height(34f));
+            _badgeStyle.normal.textColor = prev;
+        }
+
+        private static void GetBadgeInfo(ParameterSnapshot p, out string text, out Color color)
+        {
+            if (p.IsInternalParameter)
+            {
+                text = "内部 (v1.1)";
+                color = new Color(0.68f, 0.68f, 0.72f, 1f);
+                return;
+            }
+
+            if (p.Suggestion.HasStrictIntRecommendation)
+            {
+                text = $"縮小おすすめ ({p.Suggestion.RecommendedIntBitWidth}b)";
+                color = new Color(0.42f, 0.88f, 0.56f, 1f);
+                return;
+            }
+
+            if (p.Suggestion.IsRadialFloatReferenceCandidate)
+            {
+                text = "スライダー候補";
+                color = new Color(0.45f, 0.78f, 0.95f, 1f);
+                return;
+            }
+
+            if (p.Suggestion.IsUnusedCandidate)
+            {
+                text = "未使用かも";
+                color = new Color(0.95f, 0.78f, 0.35f, 1f);
+                return;
+            }
+
+            if (p.ProtectionFlags != ProtectionFlags.None)
+            {
+                text = "保護注意";
+                color = new Color(0.95f, 0.58f, 0.38f, 1f);
+                return;
+            }
+
+            text = string.Empty;
+            color = Color.white;
         }
 
         private void DrawInlineActionSelector(ExParamManagerComponent comp, ParameterSnapshot p, ParameterRule rule)
@@ -286,38 +697,98 @@ namespace Sebanne.ExParamManager.Editor
             {
                 using (new EditorGUI.DisabledScope(true))
                 {
-                    GUILayout.Button("v1.1予定", EditorStyles.miniButton, GUILayout.Width(96f));
+                    GUILayout.Button("確認のみ (v1.1)", EditorStyles.miniButton, GUILayout.Width(ColWidthAction));
                 }
                 return;
             }
 
             if (comp == null)
             {
-                GUILayout.Label(rule != null ? rule.action.ToString() : "Keep", EditorStyles.miniLabel, GUILayout.Width(96f));
+                GUILayout.Label("閲覧中", EditorStyles.miniLabel, GUILayout.Width(ColWidthAction), GUILayout.Height(34f));
                 return;
             }
 
             ParameterAction curAction = rule != null ? rule.action : ParameterAction.Keep;
+            bool isBool = p.ValueKind == ParameterValueKind.Bool;
+            int curIndex = ActionToPopupIndex(curAction, isBool);
+            string[] labels = isBool ? BoolActionLabels : NumericActionLabels;
+
             EditorGUI.BeginChangeCheck();
-            ParameterAction nextAction = (ParameterAction)EditorGUILayout.EnumPopup(curAction, GUILayout.Width(96f));
+            int nextIndex = EditorGUILayout.Popup(curIndex, labels, GUILayout.Width(ColWidthAction));
             if (EditorGUI.EndChangeCheck())
             {
-                ExParamManagerEditor.RecordEdit(comp, "Change ExParam Rule Action");
-                ParameterRule targetRule = comp.GetOrCreateRule(
+                ParameterAction nextAction = PopupIndexToAction(nextIndex, isBool);
+                ApplyParameterAction(comp, p, nextAction);
+                _selectedParamKey = p.EffectiveName;
+            }
+        }
+
+        private void ApplyParameterAction(ExParamManagerComponent comp, ParameterSnapshot p, ParameterAction nextAction)
+        {
+            if (comp == null || p == null || p.IsInternalParameter)
+            {
+                return;
+            }
+
+            if (nextAction == ParameterAction.Keep)
+            {
+                ExParamManagerEditor.RecordEdit(comp, "Reset ExParam Rule to Keep");
+                comp.RemoveRule(p.EffectiveName, p.SourceComponent);
+                return;
+            }
+
+            ExParamManagerEditor.RecordEdit(comp, "Change ExParam Rule Action");
+            ParameterRule targetRule = comp.GetOrCreateRule(
+                p.EffectiveName,
+                p.SourceComponent,
+                p.SourceObjectPath,
+                p.IsInternalParameter,
+                p.OriginalName);
+            targetRule.action = nextAction;
+
+            if (nextAction == ParameterAction.ResizeBitWidth)
+            {
+                if (p.Suggestion.HasStrictIntRecommendation)
+                {
+                    targetRule.targetBitWidth = p.Suggestion.RecommendedIntBitWidth;
+                }
+                else if (p.Suggestion.IsRadialFloatReferenceCandidate)
+                {
+                    targetRule.targetBitWidth = 4;
+                }
+            }
+        }
+
+        private void ApplyAllStrictIntRecommendations(ExParamManagerComponent comp)
+        {
+            if (comp == null || _scanResult == null)
+            {
+                return;
+            }
+
+            ExParamManagerEditor.RecordEdit(comp, "Apply Recommended Int BitWidths");
+            for (int i = 0; i < _scanResult.Parameters.Count; i++)
+            {
+                ParameterSnapshot p = _scanResult.Parameters[i];
+                if (!p.Suggestion.HasStrictIntRecommendation || p.IsInternalParameter)
+                {
+                    continue;
+                }
+
+                ParameterRule existing = comp.FindRule(p.EffectiveName, p.SourceComponent);
+                if (existing != null && existing.action != ParameterAction.Keep)
+                {
+                    continue;
+                }
+
+                ParameterRule r = comp.GetOrCreateRule(
                     p.EffectiveName,
                     p.SourceComponent,
                     p.SourceObjectPath,
                     p.IsInternalParameter,
                     p.OriginalName);
-                targetRule.action = nextAction;
-                if (nextAction == ParameterAction.ResizeBitWidth && p.Suggestion.HasStrictIntRecommendation)
-                {
-                    targetRule.targetBitWidth = p.Suggestion.RecommendedIntBitWidth;
-                }
-                else if (nextAction == ParameterAction.ResizeBitWidth && p.Suggestion.IsRadialFloatReferenceCandidate)
-                {
-                    targetRule.targetBitWidth = 4;
-                }
+                r.action = ParameterAction.ResizeBitWidth;
+                r.targetBitWidth = p.Suggestion.RecommendedIntBitWidth;
             }
         }
 
@@ -325,80 +796,228 @@ namespace Sebanne.ExParamManager.Editor
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true)))
             {
-                EditorGUILayout.LabelField("詳細・逆引き", EditorStyles.boldLabel);
                 ParameterSnapshot p = _scanResult?.Parameters.FirstOrDefault(x => x.EffectiveName == _selectedParamKey);
                 if (p == null)
                 {
-                    EditorGUILayout.LabelField("左の一覧からパラメータを選択すると詳細と参照先を表示します。", EditorStyles.miniLabel);
+                    DrawBeginnerQuickGuide();
                     return;
                 }
 
                 _rightScroll = EditorGUILayout.BeginScrollView(_rightScroll);
-                ParameterRule rule = comp != null ? comp.FindRule(p.EffectiveName, p.SourceComponent) : null;
-
-                EditorGUILayout.LabelField("パラメータ名", p.EffectiveName);
-                EditorGUILayout.LabelField("型 / 同期 / 保存", $"{p.ValueKind} / Synced={p.IsSynced} / Saved={p.Saved} / 既定値={p.DefaultValue}");
-                EditorGUILayout.LabelField("bit 幅 / 符号表現", $"{p.CurrentBitWidth} bit / {p.Signedness}");
-
-                using (new EditorGUI.DisabledScope(true))
+                try
                 {
-                    EditorGUILayout.ObjectField("発生源コンポーネント", p.SourceComponent, typeof(Component), true);
+                    ParameterRule rule = comp != null ? comp.FindRule(p.EffectiveName, p.SourceComponent) : null;
+                    DrawDetailOverviewCard(p);
+                    EditorGUILayout.Space(6f);
+                    DrawDetailActionSection(comp, p, rule);
+                    EditorGUILayout.Space(6f);
+                    DrawDetailReferencesSection(p);
+                }
+                finally
+                {
+                    EditorGUILayout.EndScrollView();
+                }
+            }
+        }
+
+        private void DrawBeginnerQuickGuide()
+        {
+            EditorGUILayout.LabelField("ExParam Manager ガイド", _sectionHeaderStyle);
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.HelpBox(
+                "使い方 3 ステップ:\n"
+                + "1. 左の一覧から気になるパラメータをクリックします（メニュー名も表示されます）。\n"
+                + "2. 上のタブ「減らせそう」「未使用かも」で節約候補をすぐに見つけられます。\n"
+                + "3. 右パネルで「削除」「自分だけ」「bit縮小」を選び、そのままアップロードすれば非破壊で適用されます。",
+                MessageType.Info);
+
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.HelpBox(
+                "ビルド時の扱い（どれを選ぶとどうなる？）:\n"
+                + "・そのまま: 変更せずそのまま使います。\n"
+                + "・削除 (0b): パラメータを消し、専用メニュー項目も隠します（使わないギミック向け）。\n"
+                + "・自分だけ (0b): 自分の画面では動きますが他プレイヤーには同期しません（自分専用設定向け）。\n"
+                + "・bit縮小 (実験): Int/Float の消費 bit を 2〜8 bit に減らします（SDK 3.10.6以降・2クライアント同期未検証）。",
+                MessageType.None);
+        }
+
+        private void DrawDetailOverviewCard(ParameterSnapshot p)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(p.EffectiveName, _sectionHeaderStyle);
+
+                if (!string.IsNullOrEmpty(p.PrimaryMenuLabel))
+                {
+                    EditorGUILayout.LabelField($"メニュー上の名前: {p.PrimaryMenuLabel}", EditorStyles.miniLabel);
+                }
+
+                string syncText = p.IsSynced ? "同期あり" : "非同期 (0b)";
+                string savedText = p.Saved ? "あり" : "なし";
+                EditorGUILayout.LabelField(
+                    $"型: {p.ValueKind} / 消費: {p.EffectiveBitCost} bit ({syncText}) / 状態保存(Saved): {savedText} / 初期値: {p.DefaultValue}",
+                    _wrappedMiniStyle);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    string originText = string.IsNullOrEmpty(p.SourceObjectPath)
+                        ? $"出所: {p.PrefabGroupDisplayName}"
+                        : $"出所: {p.PrefabGroupDisplayName} ({p.SourceObjectPath})";
+                    EditorGUILayout.LabelField(originText, _wrappedMiniStyle);
+
+                    if (p.SourceComponent != null && GUILayout.Button("場所を見る", GUILayout.Width(82f)))
+                    {
+                        PingAndSelect(p.SourceComponent);
+                    }
                 }
 
                 if (p.ProtectionReasons.Count > 0)
                 {
-                    EditorGUILayout.Space(4f);
-                    EditorGUILayout.HelpBox("保護・注意理由:\n- " + string.Join("\n- ", p.ProtectionReasons), MessageType.Warning);
+                    EditorGUILayout.Space(2f);
+                    EditorGUILayout.HelpBox("保護・注意理由:\n・" + string.Join("\n・", p.ProtectionReasons), MessageType.Warning);
+                }
+            }
+        }
+
+        private void DrawDetailActionSection(ExParamManagerComponent comp, ParameterSnapshot p, ParameterRule rule)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("ビルド時の扱い", EditorStyles.boldLabel);
+
+                if (comp == null)
+                {
+                    EditorGUILayout.HelpBox("アバターに ExParam Manager コンポーネントを追加すると、ここで操作を切り替えられます。", MessageType.Info);
+                    if (_targetAvatar != null && GUILayout.Button("ExParam Manager を追加して編集を始める", GUILayout.Height(24f)))
+                    {
+                        Undo.AddComponent<ExParamManagerComponent>(_targetAvatar.gameObject);
+                        RunScan();
+                    }
+                    return;
                 }
 
-                // 厳格 Int 推奨 / Radial Float 試算
+                if (p.IsInternalParameter)
+                {
+                    EditorGUILayout.HelpBox("Modular Avatar の内部パラメータ（internalParameter）のため、初版では確認・逆引きのみ対応しています（変更操作は v1.1 で対応予定）。", MessageType.Info);
+                    return;
+                }
+
+                ParameterAction curAction = rule != null ? rule.action : ParameterAction.Keep;
+                bool isBool = p.ValueKind == ParameterValueKind.Bool;
+
+                // 大きめ切替ボタン行
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    DrawActionChoiceButton(comp, p, ParameterAction.Keep, curAction, "そのまま", new Color(0.50f, 0.55f, 0.62f, 1f));
+                    DrawActionChoiceButton(comp, p, ParameterAction.Remove, curAction, "削除 (0b)", new Color(0.85f, 0.35f, 0.35f, 1f));
+                    DrawActionChoiceButton(comp, p, ParameterAction.MakeLocal, curAction, "自分だけ (0b)", new Color(0.32f, 0.62f, 0.92f, 1f));
+                    if (!isBool)
+                    {
+                        DrawActionChoiceButton(comp, p, ParameterAction.ResizeBitWidth, curAction, "bit縮小 (実験)", new Color(0.90f, 0.65f, 0.22f, 1f));
+                    }
+                }
+
+                // この設定でビルドするとどうなるか（効果プレビュー）
+                EditorGUILayout.Space(4f);
+                DrawActionImpactPreview(comp, p, rule, curAction);
+
+                // 自動提案カード
                 if (p.Suggestion.HasStrictIntRecommendation || p.Suggestion.HasConditionalIntEstimate)
                 {
                     EditorGUILayout.Space(4f);
-                    EditorGUILayout.LabelField(p.Suggestion.IntReason, EditorStyles.wordWrappedMiniLabel);
-                    if (comp != null && p.Suggestion.HasStrictIntRecommendation && EnvironmentCapabilities.HasVrcSdk3106)
-                    {
-                        if (GUILayout.Button($"推奨 {p.Suggestion.RecommendedIntBitWidth} bit を適用（実験）"))
-                        {
-                            ExParamManagerEditor.RecordEdit(comp, "Apply Recommended Int BitWidth");
-                            ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
-                            r.action = ParameterAction.ResizeBitWidth;
-                            r.targetBitWidth = p.Suggestion.RecommendedIntBitWidth;
-                        }
-                    }
+                    DrawIntSuggestionBox(comp, p);
                 }
 
                 if (p.Suggestion.IsRadialFloatReferenceCandidate)
                 {
                     EditorGUILayout.Space(4f);
-                    EditorGUILayout.LabelField(p.Suggestion.FloatReason, EditorStyles.wordWrappedMiniLabel);
-                    if (comp != null && EnvironmentCapabilities.HasVrcSdk3106)
+                    DrawFloatSuggestionBox(comp, p);
+                }
+            }
+        }
+
+        private void DrawActionChoiceButton(
+            ExParamManagerComponent comp,
+            ParameterSnapshot p,
+            ParameterAction buttonAction,
+            ParameterAction curAction,
+            string label,
+            Color activeColor)
+        {
+            bool isActive = curAction == buttonAction;
+            Color prev = GUI.backgroundColor;
+            if (isActive)
+            {
+                GUI.backgroundColor = activeColor;
+            }
+
+            if (GUILayout.Button(label, GUILayout.Height(24f)))
+            {
+                ApplyParameterAction(comp, p, buttonAction);
+            }
+
+            GUI.backgroundColor = prev;
+        }
+
+        private void DrawActionImpactPreview(
+            ExParamManagerComponent comp,
+            ParameterSnapshot p,
+            ParameterRule rule,
+            ParameterAction curAction)
+        {
+            switch (curAction)
+            {
+                case ParameterAction.Keep:
+                    EditorGUILayout.HelpBox(
+                        $"この設定でビルドすると:\n"
+                        + $"・変更しません。現在と同じ {p.EffectiveBitCost} bit のままビルドされます。",
+                        MessageType.None);
+                    break;
+
+                case ParameterAction.Remove:
+                {
+                    string savedLine = p.Saved
+                        ? $"\n・VRChat 再起動後の状態保存(Saved)は外れ、初期値 ({p.DefaultValue}) が Animator へ引き継がれます。"
+                        : string.Empty;
+                    EditorGUILayout.HelpBox(
+                        $"この設定でビルドすると:\n"
+                        + $"・同期 bit: {p.EffectiveBitCost} → 0 bit（-{p.EffectiveBitCost} bit 削減）\n"
+                        + $"・使わない衣装・ギミックの整理向けです。元のアバター・アセットは変わりません。{savedLine}",
+                        MessageType.Info);
+
+                    if (rule != null)
                     {
-                        using (new EditorGUILayout.HorizontalScope())
+                        EditorGUI.BeginChangeCheck();
+                        string menuHint = !string.IsNullOrEmpty(p.PrimaryMenuLabel)
+                            ? $"専用メニュー項目もビルド時に隠す（{p.PrimaryMenuLabel}）"
+                            : "専用メニュー項目もビルド時に隠す";
+                        bool hideMenu = EditorGUILayout.ToggleLeft(menuHint, rule.hideMenuControlsOnRemove);
+                        if (EditorGUI.EndChangeCheck())
                         {
-                            if (GUILayout.Button("4 bit 縮小（実験）"))
-                            {
-                                ExParamManagerEditor.RecordEdit(comp, "Apply Radial Float 4 bit");
-                                ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
-                                r.action = ParameterAction.ResizeBitWidth;
-                                r.targetBitWidth = 4;
-                            }
-                            if (GUILayout.Button("5 bit 縮小（実験）"))
-                            {
-                                ExParamManagerEditor.RecordEdit(comp, "Apply Radial Float 5 bit");
-                                ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
-                                r.action = ParameterAction.ResizeBitWidth;
-                                r.targetBitWidth = 5;
-                            }
+                            ExParamManagerEditor.RecordEdit(comp, "Toggle Hide Menu On Remove");
+                            rule.hideMenuControlsOnRemove = hideMenu;
                         }
                     }
+                    break;
                 }
 
-                // ルール個別編集
-                if (comp != null && rule != null && !p.IsInternalParameter)
-                {
-                    EditorGUILayout.Space(6f);
-                    if (rule.action == ParameterAction.ResizeBitWidth)
+                case ParameterAction.MakeLocal:
+                    EditorGUILayout.HelpBox(
+                        $"この設定でビルドすると:\n"
+                        + $"・同期 bit: {p.EffectiveBitCost} → 0 bit（-{p.EffectiveBitCost} bit 削減）\n"
+                        + $"・自分の画面では今まで通り動きますが、他のプレイヤーには変化が同期されなくなります（自分専用設定向け）。\n"
+                        + $"・元のアバター・アセットは変わりません。",
+                        MessageType.Info);
+                    break;
+
+                case ParameterAction.ResizeBitWidth:
+                    if (!EnvironmentCapabilities.HasVrcSdk3106)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小は適用されません（ビルド時にスキップされます）。",
+                            MessageType.Warning);
+                    }
+                    else if (rule != null)
                     {
                         EditorGUI.BeginChangeCheck();
                         int bw = EditorGUILayout.IntSlider("目標 bit 幅（実験）", rule.GetClampedBitWidth(), 2, 8);
@@ -407,43 +1026,290 @@ namespace Sebanne.ExParamManager.Editor
                             ExParamManagerEditor.RecordEdit(comp, "Adjust Target BitWidth");
                             rule.targetBitWidth = bw;
                         }
-                    }
-                    else if (rule.action == ParameterAction.Remove)
-                    {
-                        EditorGUI.BeginChangeCheck();
-                        bool hideMenu = EditorGUILayout.Toggle("専用メニュー項目も隠す", rule.hideMenuControlsOnRemove);
-                        if (EditorGUI.EndChangeCheck())
-                        {
-                            ExParamManagerEditor.RecordEdit(comp, "Toggle Hide Menu On Remove");
-                            rule.hideMenuControlsOnRemove = hideMenu;
-                        }
-                        if (p.Saved)
-                        {
-                            EditorGUILayout.LabelField("※ 削除時は Saved（VRChat アバター間の状態保存）が失われます。既定値は Animator 初期値へ書き戻されます。", EditorStyles.wordWrappedMiniLabel);
-                        }
-                    }
-                }
 
-                // 逆引き参照一覧
-                EditorGUILayout.Space(6f);
-                EditorGUILayout.LabelField($"逆引き参照（{p.References.Count} 件）", EditorStyles.boldLabel);
-                for (int i = 0; i < p.References.Count; i++)
+                        int clamped = rule.GetClampedBitWidth();
+                        int saved = Mathf.Max(0, p.EffectiveBitCost - clamped);
+                        EditorGUILayout.HelpBox(
+                            $"この設定でビルドすると:\n"
+                            + $"・同期 bit: {p.EffectiveBitCost} → {clamped} bit（-{saved} bit 削減）\n"
+                            + $"※ VRChat の 2 クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。",
+                            MessageType.Warning);
+                    }
+                    break;
+            }
+        }
+
+        private void DrawIntSuggestionBox(ExParamManagerComponent comp, ParameterSnapshot p)
+        {
+            if (p.Suggestion.HasStrictIntRecommendation)
+            {
+                string msg = $"縮小おすすめ: このアバターでは値 {p.Suggestion.ObservedMinInt}〜{p.Suggestion.ObservedMaxInt} しか使っていないため "
+                    + $"{p.Suggestion.RecommendedIntBitWidth} bit で足ります（-{p.Suggestion.IntBitSavings} bit 節約）。";
+                EditorGUILayout.HelpBox(msg, MessageType.Info);
+                if (EnvironmentCapabilities.HasVrcSdk3106)
                 {
-                    ParameterReference rf = p.References[i];
-                    using (new EditorGUILayout.HorizontalScope())
+                    if (GUILayout.Button($"推奨 {p.Suggestion.RecommendedIntBitWidth} bit を適用（実験）"))
                     {
-                        EditorGUILayout.LabelField($"[{rf.Kind}] {rf.DisplayLabel}", EditorStyles.miniLabel);
-                        if (rf.TargetObject != null)
+                        ExParamManagerEditor.RecordEdit(comp, "Apply Recommended Int BitWidth");
+                        ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
+                        r.action = ParameterAction.ResizeBitWidth;
+                        r.targetBitWidth = p.Suggestion.RecommendedIntBitWidth;
+                    }
+                }
+            }
+            else if (p.Suggestion.HasConditionalIntEstimate)
+            {
+                EditorGUILayout.LabelField("参考試算: " + p.Suggestion.IntReason, _wrappedMiniStyle);
+            }
+        }
+
+        private void DrawFloatSuggestionBox(ExParamManagerComponent comp, ParameterSnapshot p)
+        {
+            EditorGUILayout.HelpBox(
+                $"スライダー縮小候補: スライダー（Radial Puppet）専用の Float です。\n"
+                + $"4 bit 化（16段階）で -{p.Suggestion.RadialFloat4BitSavings} bit、5 bit 化（32段階）で -{p.Suggestion.RadialFloat5BitSavings} bit 削減できます。",
+                MessageType.Info);
+
+            if (EnvironmentCapabilities.HasVrcSdk3106)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button($"4 bit（16段階 / -{p.Suggestion.RadialFloat4BitSavings}b）を適用"))
+                    {
+                        ExParamManagerEditor.RecordEdit(comp, "Apply Radial Float 4 bit");
+                        ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
+                        r.action = ParameterAction.ResizeBitWidth;
+                        r.targetBitWidth = 4;
+                    }
+                    if (GUILayout.Button($"5 bit（32段階 / -{p.Suggestion.RadialFloat5BitSavings}b）を適用"))
+                    {
+                        ExParamManagerEditor.RecordEdit(comp, "Apply Radial Float 5 bit");
+                        ParameterRule r = comp.GetOrCreateRule(p.EffectiveName, p.SourceComponent, p.SourceObjectPath);
+                        r.action = ParameterAction.ResizeBitWidth;
+                        r.targetBitWidth = 5;
+                    }
+                }
+            }
+        }
+
+        private void DrawDetailReferencesSection(ParameterSnapshot p)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField($"どこで使われているか（合計 {p.References.Count} 件）", EditorStyles.boldLabel);
+
+                if (p.References.Count == 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "このアバター内のメニュー・Animator・PhysBone 等からは参照が見つかりませんでした（OSC や VRCFury 等の外部ツールから使われている可能性だけご確認ください）。",
+                        MessageType.Info);
+                    return;
+                }
+
+                // 1. メニュー
+                if (p.MenuRefCount > 0)
+                {
+                    DrawReferenceCategoryHeader($"メニュー（{p.MenuRefCount} 件）");
+                    for (int i = 0; i < p.References.Count; i++)
+                    {
+                        ParameterReference rf = p.References[i];
+                        if (rf.Kind != ReferenceKind.ExpressionsMenuAsset
+                            && rf.Kind != ReferenceKind.MaMenuItem
+                            && rf.Kind != ReferenceKind.MaMenuInstaller)
                         {
-                            using (new EditorGUI.DisabledScope(true))
-                            {
-                                EditorGUILayout.ObjectField(rf.TargetObject, typeof(UnityEngine.Object), true, GUILayout.Width(130f));
-                            }
+                            continue;
                         }
+
+                        string typeJa = GetMenuControlTypeLabel(rf.MenuControlType);
+                        string label = string.IsNullOrEmpty(typeJa)
+                            ? rf.DisplayLabel
+                            : $"{rf.DisplayLabel} [{typeJa}]";
+                        DrawReferenceRow(label, rf.TargetObject);
                     }
                 }
 
-                EditorGUILayout.EndScrollView();
+                // 2. 表情・アニメ / Animator（コントローラ単位で折りたたみ）
+                if (p.AnimatorRefCount > 0)
+                {
+                    DrawReferenceCategoryHeader($"表情・アニメ / Animator（{p.AnimatorRefCount} 件）");
+                    DrawGroupedAnimatorReferences(p);
+                }
+
+                // 3. 自動切替 / ParameterDriver
+                if (p.DriverRefCount > 0)
+                {
+                    DrawReferenceCategoryHeader($"自動切替 / ParameterDriver（{p.DriverRefCount} 件）");
+                    for (int i = 0; i < p.References.Count; i++)
+                    {
+                        ParameterReference rf = p.References[i];
+                        if (rf.Kind != ReferenceKind.ParameterDriverWrite && rf.Kind != ReferenceKind.ParameterDriverCopySource)
+                        {
+                            continue;
+                        }
+
+                        string suffix = rf.Kind == ReferenceKind.ParameterDriverWrite ? "へ書込" : "からコピー";
+                        string label = string.IsNullOrEmpty(rf.Detail)
+                            ? $"{rf.DisplayLabel}（{suffix}）"
+                            : $"{rf.DisplayLabel}（{rf.Detail} {suffix}）";
+                        DrawReferenceRow(label, rf.TargetObject);
+                    }
+                }
+
+                // 4. 揺れもの・接触 / PhysBone・Contact
+                if (p.DynamicsRefCount > 0)
+                {
+                    DrawReferenceCategoryHeader($"揺れもの・接触 / PhysBone・Contact（{p.DynamicsRefCount} 件）");
+                    for (int i = 0; i < p.References.Count; i++)
+                    {
+                        ParameterReference rf = p.References[i];
+                        if (rf.Kind != ReferenceKind.PhysBone && rf.Kind != ReferenceKind.ContactReceiver)
+                        {
+                            continue;
+                        }
+
+                        DrawReferenceRow(rf.DisplayLabel, rf.TargetObject);
+                    }
+                }
+
+                // 5. Modular Avatar 連携
+                if (p.ReactiveRefCount > 0)
+                {
+                    DrawReferenceCategoryHeader($"Modular Avatar 連携（{p.ReactiveRefCount} 件）");
+                    for (int i = 0; i < p.References.Count; i++)
+                    {
+                        ParameterReference rf = p.References[i];
+                        if (rf.Kind != ReferenceKind.MaReactive)
+                        {
+                            continue;
+                        }
+
+                        DrawReferenceRow(rf.DisplayLabel, rf.TargetObject);
+                    }
+                }
+            }
+        }
+
+        private void DrawGroupedAnimatorReferences(ParameterSnapshot p)
+        {
+            var grouped = new Dictionary<string, List<ParameterReference>>(StringComparer.Ordinal);
+            var order = new List<string>();
+
+            for (int i = 0; i < p.References.Count; i++)
+            {
+                ParameterReference rf = p.References[i];
+                if (rf.Kind != ReferenceKind.AnimatorTransition
+                    && rf.Kind != ReferenceKind.AnimatorAnyStateTransition
+                    && rf.Kind != ReferenceKind.AnimatorBlendTree
+                    && rf.Kind != ReferenceKind.AnimatorStateProperty)
+                {
+                    continue;
+                }
+
+                string ctrlName = rf.TargetObject != null ? rf.TargetObject.name : "Animator";
+                if (!grouped.TryGetValue(ctrlName, out List<ParameterReference> list))
+                {
+                    list = new List<ParameterReference>();
+                    grouped[ctrlName] = list;
+                    order.Add(ctrlName);
+                }
+                list.Add(rf);
+            }
+
+            for (int g = 0; g < order.Count; g++)
+            {
+                string ctrlName = order[g];
+                List<ParameterReference> refs = grouped[ctrlName];
+                UnityEngine.Object targetObj = refs[0].TargetObject;
+                string foldKey = p.EffectiveName + "::" + ctrlName;
+                bool expanded = _animatorGroupFoldouts.TryGetValue(foldKey, out bool cur) && cur;
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    expanded = EditorGUILayout.Foldout(expanded, $"{ctrlName}（{refs.Count} 箇所）", true);
+                    _animatorGroupFoldouts[foldKey] = expanded;
+                    if (targetObj != null && GUILayout.Button("アセットを見る", GUILayout.Width(100f)))
+                    {
+                        PingAndSelect(targetObj);
+                    }
+                }
+
+                if (expanded)
+                {
+                    int limit = Mathf.Min(refs.Count, 20);
+                    EditorGUI.indentLevel++;
+                    for (int i = 0; i < limit; i++)
+                    {
+                        ParameterReference rf = refs[i];
+                        string detail = string.IsNullOrEmpty(rf.Detail) ? string.Empty : $" ({rf.Detail})";
+                        EditorGUILayout.LabelField($"・{rf.DisplayLabel}{detail}", EditorStyles.miniLabel);
+                    }
+                    if (refs.Count > limit)
+                    {
+                        EditorGUILayout.LabelField($"…ほか {refs.Count - limit} 箇所", EditorStyles.miniLabel);
+                    }
+                    EditorGUI.indentLevel--;
+                }
+            }
+        }
+
+        private static void DrawReferenceCategoryHeader(string title)
+        {
+            EditorGUILayout.Space(3f);
+            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
+        }
+
+        private static void DrawReferenceRow(string label, UnityEngine.Object targetObj)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("・" + label, EditorStyles.miniLabel);
+                if (targetObj != null)
+                {
+                    bool isSceneObj = targetObj is GameObject || targetObj is Component;
+                    string btnLabel = isSceneObj ? "選択" : "アセットを見る";
+                    float btnWidth = isSceneObj ? 56f : 100f;
+                    if (GUILayout.Button(btnLabel, GUILayout.Width(btnWidth)))
+                    {
+                        PingAndSelect(targetObj);
+                    }
+                }
+            }
+        }
+
+        private static void PingAndSelect(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return;
+            }
+
+            if (obj is Component comp)
+            {
+                Selection.activeObject = comp.gameObject;
+                EditorGUIUtility.PingObject(comp.gameObject);
+            }
+            else if (obj is GameObject go)
+            {
+                Selection.activeObject = go;
+                EditorGUIUtility.PingObject(go);
+            }
+            else
+            {
+                EditorGUIUtility.PingObject(obj);
+            }
+        }
+
+        private static string GetMenuControlTypeLabel(int controlType)
+        {
+            switch ((VRCExpressionsMenu.Control.ControlType)controlType)
+            {
+                case VRCExpressionsMenu.Control.ControlType.Button: return "ボタン";
+                case VRCExpressionsMenu.Control.ControlType.Toggle: return "トグル";
+                case VRCExpressionsMenu.Control.ControlType.SubMenu: return "サブメニュー";
+                case VRCExpressionsMenu.Control.ControlType.TwoAxisPuppet: return "2軸パペット";
+                case VRCExpressionsMenu.Control.ControlType.FourAxisPuppet: return "4軸パペット";
+                case VRCExpressionsMenu.Control.ControlType.RadialPuppet: return "スライダー";
+                default: return string.Empty;
             }
         }
 
@@ -463,40 +1329,147 @@ namespace Sebanne.ExParamManager.Editor
 
             if (!string.IsNullOrWhiteSpace(_searchText))
             {
-                query = query.Where(p => p.EffectiveName.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0);
+                query = query.Where(p =>
+                    p.EffectiveName.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0
+                    || (!string.IsNullOrEmpty(p.PrimaryMenuLabel)
+                        && p.PrimaryMenuLabel.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0));
             }
 
-            if (_typeFilterIndex == 1) query = query.Where(p => p.ValueKind == ParameterValueKind.Int);
-            else if (_typeFilterIndex == 2) query = query.Where(p => p.ValueKind == ParameterValueKind.Float);
+            if (_typeFilterIndex == 1) query = query.Where(p => p.ValueKind == ParameterValueKind.Float);
+            else if (_typeFilterIndex == 2) query = query.Where(p => p.ValueKind == ParameterValueKind.Int);
             else if (_typeFilterIndex == 3) query = query.Where(p => p.ValueKind == ParameterValueKind.Bool);
 
-            switch (_stateFilter)
+            switch (_quickTab)
             {
-                case StateFilter.HasRule:
-                    query = query.Where(p =>
-                    {
-                        ParameterRule r = comp != null ? comp.FindRule(p.EffectiveName, p.SourceComponent) : null;
-                        return r != null && r.action != ParameterAction.Keep;
-                    });
+                case QuickFilterTab.Reducible:
+                    query = query.Where(p => p.Suggestion.HasStrictIntRecommendation || p.Suggestion.IsRadialFloatReferenceCandidate);
                     break;
-                case StateFilter.StrictIntRecommended:
-                    query = query.Where(p => p.Suggestion.HasStrictIntRecommendation);
-                    break;
-                case StateFilter.RadialFloatReference:
-                    query = query.Where(p => p.Suggestion.IsRadialFloatReferenceCandidate);
-                    break;
-                case StateFilter.UnusedCandidate:
+                case QuickFilterTab.UnusedCandidate:
                     query = query.Where(p => p.Suggestion.IsUnusedCandidate);
                     break;
-                case StateFilter.Protected:
-                    query = query.Where(p => p.ProtectionFlags != ProtectionFlags.None);
+                case QuickFilterTab.ChangedOnly:
+                    query = query.Where(p => HasNonKeepRule(comp, p));
                     break;
-                case StateFilter.InternalReadOnly:
-                    query = query.Where(p => p.IsInternalParameter);
+                case QuickFilterTab.Protected:
+                    query = query.Where(p => p.ProtectionFlags != ProtectionFlags.None);
                     break;
             }
 
-            return ParameterSortHelper.Sort(query, _sortMode);
+            return ParameterSortHelper.Sort(query, IndexToSortMode(_sortModeIndex));
+        }
+
+        private void CountTabs(
+            ExParamManagerComponent comp,
+            out int totalCount,
+            out int reducibleCount,
+            out int unusedCount,
+            out int changedCount,
+            out int protectedCount,
+            out int unappliedStrictIntCount,
+            out int unappliedStrictIntSavings)
+        {
+            totalCount = 0;
+            reducibleCount = 0;
+            unusedCount = 0;
+            changedCount = 0;
+            protectedCount = 0;
+            unappliedStrictIntCount = 0;
+            unappliedStrictIntSavings = 0;
+
+            if (_scanResult == null)
+            {
+                return;
+            }
+
+            totalCount = _scanResult.Parameters.Count;
+            for (int i = 0; i < _scanResult.Parameters.Count; i++)
+            {
+                ParameterSnapshot p = _scanResult.Parameters[i];
+                if (p.Suggestion.HasStrictIntRecommendation || p.Suggestion.IsRadialFloatReferenceCandidate)
+                {
+                    reducibleCount++;
+                }
+                if (p.Suggestion.IsUnusedCandidate)
+                {
+                    unusedCount++;
+                }
+                if (HasNonKeepRule(comp, p))
+                {
+                    changedCount++;
+                }
+                if (p.ProtectionFlags != ProtectionFlags.None)
+                {
+                    protectedCount++;
+                }
+                if (p.Suggestion.HasStrictIntRecommendation && !p.IsInternalParameter && !HasNonKeepRule(comp, p))
+                {
+                    unappliedStrictIntCount++;
+                    unappliedStrictIntSavings += p.Suggestion.IntBitSavings;
+                }
+            }
+        }
+
+        private static bool HasNonKeepRule(ExParamManagerComponent comp, ParameterSnapshot p)
+        {
+            if (comp == null || p == null || p.IsInternalParameter)
+            {
+                return false;
+            }
+
+            ParameterRule r = comp.FindRule(p.EffectiveName, p.SourceComponent);
+            return r != null && r.action != ParameterAction.Keep;
+        }
+
+        private static int CountChangedRules(ExParamManagerComponent comp)
+        {
+            if (comp == null || comp.rules == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            for (int i = 0; i < comp.rules.Count; i++)
+            {
+                if (comp.rules[i] != null && comp.rules[i].action != ParameterAction.Keep)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static int ActionToPopupIndex(ParameterAction action, bool isBool)
+        {
+            switch (action)
+            {
+                case ParameterAction.Remove: return 1;
+                case ParameterAction.MakeLocal: return 2;
+                case ParameterAction.ResizeBitWidth: return isBool ? 0 : 3;
+                default: return 0;
+            }
+        }
+
+        private static ParameterAction PopupIndexToAction(int index, bool isBool)
+        {
+            switch (index)
+            {
+                case 1: return ParameterAction.Remove;
+                case 2: return ParameterAction.MakeLocal;
+                case 3: return isBool ? ParameterAction.Keep : ParameterAction.ResizeBitWidth;
+                default: return ParameterAction.Keep;
+            }
+        }
+
+        private static ParameterSortMode IndexToSortMode(int sortIndex)
+        {
+            switch (sortIndex)
+            {
+                case 1: return ParameterSortMode.NameAscending;
+                case 2: return ParameterSortMode.ReferenceCountAscending;
+                case 3: return ParameterSortMode.TypeOrder;
+                case 0:
+                default: return ParameterSortMode.BitCostDescending;
+            }
         }
 
         private static int EstimateSingleAfterBit(ParameterSnapshot p, ParameterRule rule)
@@ -520,16 +1493,6 @@ namespace Sebanne.ExParamManager.Editor
                 default:
                     return p.EffectiveBitCost;
             }
-        }
-
-        private static string BuildShortBadge(ParameterSnapshot p)
-        {
-            if (p.IsInternalParameter) return "[internal]";
-            if (p.Suggestion.HasStrictIntRecommendation) return $"[推奨 {p.Suggestion.RecommendedIntBitWidth}b]";
-            if (p.Suggestion.IsRadialFloatReferenceCandidate) return "[Radial参考]";
-            if (p.Suggestion.IsUnusedCandidate) return "[未使用候補]";
-            if (p.ProtectionFlags != ProtectionFlags.None) return "[保護注意]";
-            return string.Empty;
         }
     }
 }

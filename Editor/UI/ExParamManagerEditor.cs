@@ -62,7 +62,7 @@ namespace Sebanne.ExParamManager.Editor
             BitBarDrawer.DrawBitBar(projection);
 
             EditorGUILayout.LabelField(
-                $"ルール内訳: 削除 {projection.RemoveRuleCount} 件 / 非同期化 {projection.MakeLocalRuleCount} 件 / bit 幅縮小 {projection.ResizeRuleCount} 件",
+                $"ルール内訳: 削除 {projection.RemoveRuleCount} 件 / 自分だけ(非同期) {projection.MakeLocalRuleCount} 件 / bit 幅縮小 {projection.ResizeRuleCount} 件",
                 EditorStyles.miniLabel);
 
             if (projection.ResizeRuleCount > 0)
@@ -82,7 +82,7 @@ namespace Sebanne.ExParamManager.Editor
                     ExParamManagerWindow.OpenFor(descriptor);
                 }
 
-                if (GUILayout.Button("再スキャン", GUILayout.Width(84f), GUILayout.Height(28f)))
+                if (GUILayout.Button("更新", GUILayout.Width(68f), GUILayout.Height(28f)))
                 {
                     _cachedScan = descriptor != null ? AvatarScanner.Scan(descriptor) : new AvatarScanResult();
                 }

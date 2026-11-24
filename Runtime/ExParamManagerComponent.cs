@@ -48,15 +48,6 @@ namespace Sebanne.ExParamManager
                         return rule;
                     }
                 }
-
-                for (int i = 0; i < rules.Count; i++)
-                {
-                    ParameterRule rule = rules[i];
-                    if (rule != null && rule.sourceComponent == sourceComponent)
-                    {
-                        return rule;
-                    }
-                }
             }
 
             if (!string.IsNullOrEmpty(effectiveName))
@@ -111,6 +102,28 @@ namespace Sebanne.ExParamManager
             };
             rules.Add(created);
             return created;
+        }
+
+        /// <summary>
+        /// 指定パラメータに対応するルールを削除する（「そのまま」へ戻す用）。
+        /// </summary>
+        public bool RemoveRule(string effectiveName, Component sourceComponent = null)
+        {
+            if (rules == null)
+            {
+                return false;
+            }
+
+            ParameterRule existing = FindRule(effectiveName, sourceComponent);
+            return existing != null && rules.Remove(existing);
+        }
+
+        /// <summary>
+        /// すべての削減ルールをクリアする。
+        /// </summary>
+        public void ClearAllRules()
+        {
+            rules?.Clear();
         }
 
         private void OnValidate()

@@ -64,6 +64,7 @@ namespace Sebanne.ExParamManager.Editor
         public string Detail = string.Empty;
         public UnityEngine.Object TargetObject;
         public string MenuControlName = string.Empty;
+        public string MenuItemLabel = string.Empty;
         public int MenuControlType;
         public float? MenuWriteValue;
         public bool IsExtractMenuObject;
@@ -124,10 +125,17 @@ namespace Sebanne.ExParamManager.Editor
 
         public bool IsInBaseExpressionParameters;
         public bool IsFromNdmfProvider;
+        public string PrimaryMenuLabel = string.Empty;
 
         public readonly List<ParameterReference> References = new List<ParameterReference>();
         public readonly List<float> MenuWriteValues = new List<float>();
         public readonly List<AnimatorConditionObservation> AnimatorConditions = new List<AnimatorConditionObservation>();
+
+        public int MenuRefCount;
+        public int AnimatorRefCount;
+        public int DriverRefCount;
+        public int DynamicsRefCount;
+        public int ReactiveRefCount;
 
         public bool HasMenuWriter;
         public bool IsRadialOnlyFloat;

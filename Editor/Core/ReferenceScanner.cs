@@ -91,6 +91,7 @@ namespace Sebanne.ExParamManager.Editor
                             resolved,
                             ReferenceKind.MaMenuItem,
                             item.DisplayName,
+                            item.DisplayName,
                             item.GameObject,
                             item.ControlType,
                             item.Value,
@@ -106,6 +107,7 @@ namespace Sebanne.ExParamManager.Editor
                             byName,
                             resolved,
                             ReferenceKind.MaMenuItem,
+                            item.DisplayName,
                             item.DisplayName,
                             item.GameObject,
                             item.ControlType,
@@ -197,6 +199,7 @@ namespace Sebanne.ExParamManager.Editor
                         paramName,
                         ReferenceKind.ExpressionsMenuAsset,
                         menu.name + " / " + ctrl.name,
+                        ctrl.name,
                         menu,
                         controlType,
                         ctrl.value,
@@ -218,6 +221,7 @@ namespace Sebanne.ExParamManager.Editor
                                 spName,
                                 ReferenceKind.ExpressionsMenuAsset,
                                 menu.name + " / " + ctrl.name,
+                                ctrl.name,
                                 menu,
                                 controlType,
                                 null,
@@ -239,6 +243,7 @@ namespace Sebanne.ExParamManager.Editor
             string paramName,
             ReferenceKind kind,
             string displayLabel,
+            string menuItemLabel,
             UnityEngine.Object target,
             int controlType,
             float? writeValue,
@@ -269,6 +274,7 @@ namespace Sebanne.ExParamManager.Editor
                 DisplayLabel = displayLabel,
                 TargetObject = target,
                 MenuControlName = displayLabel,
+                MenuItemLabel = menuItemLabel ?? string.Empty,
                 MenuControlType = controlType,
                 MenuWriteValue = writeValue,
                 IsExtractMenuObject = isExtractMenu,
@@ -662,26 +668,74 @@ namespace Sebanne.ExParamManager.Editor
                 ParameterSnapshot p = parameters[i];
                 bool hasRadial = false;
                 bool hasNonRadialMenu = false;
+                var menuLabels = new List<string>();
+                var seenMenuLabels = new HashSet<string>(StringComparer.Ordinal);
+
+                p.MenuRefCount = 0;
+                p.AnimatorRefCount = 0;
+                p.DriverRefCount = 0;
+                p.DynamicsRefCount = 0;
+                p.ReactiveRefCount = 0;
 
                 for (int r = 0; r < p.References.Count; r++)
                 {
                     ParameterReference rf = p.References[r];
-                    if (rf.Kind != ReferenceKind.ExpressionsMenuAsset && rf.Kind != ReferenceKind.MaMenuItem)
+                    switch (rf.Kind)
                     {
-                        continue;
-                    }
+                        case ReferenceKind.ExpressionsMenuAsset:
+                        case ReferenceKind.MaMenuItem:
+                        case ReferenceKind.MaMenuInstaller:
+                            p.MenuRefCount++;
+                            if (rf.Kind != ReferenceKind.MaMenuInstaller)
+                            {
+                                if (rf.MenuControlType == (int)VRCExpressionsMenu.Control.ControlType.RadialPuppet)
+                                {
+                                    hasRadial = true;
+                                }
+                                else
+                                {
+                                    hasNonRadialMenu = true;
+                                }
+                            }
 
-                    if (rf.MenuControlType == (int)VRCExpressionsMenu.Control.ControlType.RadialPuppet)
-                    {
-                        hasRadial = true;
-                    }
-                    else
-                    {
-                        hasNonRadialMenu = true;
+                            string candidateLabel = !string.IsNullOrWhiteSpace(rf.MenuItemLabel)
+                                ? rf.MenuItemLabel.Trim()
+                                : (rf.DisplayLabel ?? string.Empty).Trim();
+                            if (!string.IsNullOrEmpty(candidateLabel) && seenMenuLabels.Add(candidateLabel))
+                            {
+                                menuLabels.Add(candidateLabel);
+                            }
+                            break;
+
+                        case ReferenceKind.AnimatorTransition:
+                        case ReferenceKind.AnimatorAnyStateTransition:
+                        case ReferenceKind.AnimatorBlendTree:
+                        case ReferenceKind.AnimatorStateProperty:
+                            p.AnimatorRefCount++;
+                            break;
+
+                        case ReferenceKind.ParameterDriverWrite:
+                        case ReferenceKind.ParameterDriverCopySource:
+                            p.DriverRefCount++;
+                            break;
+
+                        case ReferenceKind.PhysBone:
+                        case ReferenceKind.ContactReceiver:
+                            p.DynamicsRefCount++;
+                            break;
+
+                        case ReferenceKind.MaReactive:
+                            p.ReactiveRefCount++;
+                            break;
                     }
                 }
 
                 p.IsRadialOnlyFloat = p.ValueKind == ParameterValueKind.Float && hasRadial && !hasNonRadialMenu;
+                p.PrimaryMenuLabel = menuLabels.Count == 0
+                    ? string.Empty
+                    : menuLabels.Count == 1
+                        ? menuLabels[0]
+                        : $"{menuLabels[0]} ほか{menuLabels.Count - 1}件";
             }
         }
 

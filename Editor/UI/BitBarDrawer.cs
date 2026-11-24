@@ -108,10 +108,17 @@ namespace Sebanne.ExParamManager.Editor
         public static void DrawBitBar(BitProjection projection)
         {
             int maxCost = VRCExpressionParameters.MAX_PARAMETER_COST;
-            float ratio = Mathf.Clamp01(projection.AfterBits / (float)maxCost);
+            float beforeRatio = Mathf.Clamp01(projection.BeforeBits / (float)maxCost);
+            float afterRatio = Mathf.Clamp01(projection.AfterBits / (float)maxCost);
 
-            Rect rect = GUILayoutUtility.GetRect(18, 22, GUILayout.ExpandWidth(true));
-            EditorGUI.DrawRect(rect, new Color(0.16f, 0.16f, 0.16f, 1f));
+            Rect rect = GUILayoutUtility.GetRect(18, 24, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.14f, 0.14f, 0.14f, 1f));
+
+            if (projection.SavedBits > 0)
+            {
+                var beforeRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * beforeRatio), rect.height - 2f);
+                EditorGUI.DrawRect(beforeRect, new Color(0.35f, 0.72f, 0.48f, 0.28f));
+            }
 
             Color fillColor = projection.AfterBits > maxCost
                 ? new Color(0.82f, 0.24f, 0.24f, 1f)
@@ -119,12 +126,27 @@ namespace Sebanne.ExParamManager.Editor
                     ? new Color(0.85f, 0.60f, 0.18f, 1f)
                     : new Color(0.24f, 0.65f, 0.38f, 1f);
 
-            var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * ratio), rect.height - 2f);
+            var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * afterRatio), rect.height - 2f);
             EditorGUI.DrawRect(fillRect, fillColor);
 
-            string text = projection.SavedBits > 0
-                ? $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（-{projection.SavedBits} bit）"
-                : $"同期 bit: {projection.AfterBits} / {maxCost} bit";
+            string text;
+            if (projection.AfterBits > maxCost)
+            {
+                int over = projection.AfterBits - maxCost;
+                text = projection.SavedBits > 0
+                    ? $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）"
+                    : $"同期 bit: {projection.AfterBits} / {maxCost} bit（+{over} bit 超過）";
+            }
+            else if (projection.SavedBits > 0)
+            {
+                int remaining = maxCost - projection.AfterBits;
+                text = $"同期 bit: {projection.BeforeBits} → {projection.AfterBits} / {maxCost} bit（-{projection.SavedBits} bit 削減 / 残り {remaining} bit）";
+            }
+            else
+            {
+                int remaining = maxCost - projection.AfterBits;
+                text = $"同期 bit: {projection.AfterBits} / {maxCost} bit（残り {remaining} bit）";
+            }
 
             var style = new GUIStyle(EditorStyles.boldLabel)
             {
