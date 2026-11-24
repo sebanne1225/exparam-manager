@@ -41,9 +41,9 @@ namespace Sebanne.ExParamManager.Editor.Tests
             var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
             expParams.parameters = new[]
             {
-                new VRCExpressionParameters.Parameter { name = "RemoveMe", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, defaultValue = 3f, bitWidth = 8 },
+                new VRCExpressionParameters.Parameter { name = "RemoveMe", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, defaultValue = 3f },
                 new VRCExpressionParameters.Parameter { name = "LocalMe", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
-                new VRCExpressionParameters.Parameter { name = "ResizeMe", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, defaultValue = 10f, bitWidth = 8, flippedRepresentation = false },
+                new VRCExpressionParameters.Parameter { name = "ResizeMe", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, defaultValue = 10f },
                 new VRCExpressionParameters.Parameter { name = "InternalSkip", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
             };
             desc.expressionParameters = expParams;
@@ -74,8 +74,13 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.IsFalse(resultParams.parameters.First(p => p.name == "LocalMe").networkSynced);
 
             var resized = resultParams.parameters.First(p => p.name == "ResizeMe");
+#if HAS_VRCSDK3_AVATARS_3_10_6
             Assert.AreEqual(2, resized.bitWidth);
             Assert.AreEqual(3f, resized.defaultValue); // clamped to 0..3
+#else
+            Assert.AreEqual(10f, resized.defaultValue);
+            Assert.IsTrue(ctx.GetState<ExParamBuildState>().RecordedReports.Any(r => r.Severity == ErrorSeverity.Information));
+#endif
 
             // internalParameter rule is skipped in v1.0
             Assert.IsTrue(resultParams.parameters.Any(p => p.name == "InternalSkip"));
@@ -182,7 +187,7 @@ namespace Sebanne.ExParamManager.Editor.Tests
             var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
             expParams.parameters = new[]
             {
-                new VRCExpressionParameters.Parameter { name = "IntParam", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, bitWidth = 8 },
+                new VRCExpressionParameters.Parameter { name = "IntParam", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
             };
             desc.expressionParameters = expParams;
 
@@ -201,6 +206,163 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.AreEqual(8, sdk3105.AfterBits);
             Assert.AreEqual(0, sdk3105.SavedBits);
             Assert.AreEqual(1, sdk3105.SkippedResizeOnOldSdkCount);
+        }
+
+        [Test]
+        public void Pass2_DoesNotCloneUnmodifiedMenu_AndHandlesCircularMenuRemoval()
+        {
+            var root = Track(new GameObject("AvatarRoot"));
+            var desc = root.AddComponent<VRCAvatarDescriptor>();
+
+            var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+            expParams.parameters = new[]
+            {
+                new VRCExpressionParameters.Parameter { name = "RemoveP", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "OtherP", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+            };
+            desc.expressionParameters = expParams;
+
+            // Unmodified menu case
+            var untouchedMenu = Track(ScriptableObject.CreateInstance<VRCExpressionsMenu>());
+            untouchedMenu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "KeepOther",
+                type = VRCExpressionsMenu.Control.ControlType.Toggle,
+                parameter = new VRCExpressionsMenu.Control.Parameter { name = "OtherP" },
+            });
+            desc.expressionsMenu = untouchedMenu;
+
+            var comp = root.AddComponent<ExParamManagerComponent>();
+            comp.rules.Add(new ParameterRule { parameterName = "RemoveP", action = ParameterAction.Remove, hideMenuControlsOnRemove = true });
+
+            var ctx1 = new BuildContext(root, null, isClone: true);
+            ExParamBuildProcessor.RunPass1(ctx1);
+            ExParamBuildProcessor.RunPass2(ctx1);
+            Assert.AreSame(untouchedMenu, desc.expressionsMenu);
+
+            // Circular menu removal case
+            var menuA = Track(ScriptableObject.CreateInstance<VRCExpressionsMenu>());
+            var menuB = Track(ScriptableObject.CreateInstance<VRCExpressionsMenu>());
+            menuA.controls.Add(new VRCExpressionsMenu.Control { name = "SubB", type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = menuB });
+            menuB.controls.Add(new VRCExpressionsMenu.Control { name = "SubA", type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = menuA });
+            menuB.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "KillToggle",
+                type = VRCExpressionsMenu.Control.ControlType.Toggle,
+                parameter = new VRCExpressionsMenu.Control.Parameter { name = "RemoveP" },
+            });
+            desc.expressionsMenu = menuA;
+            expParams.parameters = new[]
+            {
+                new VRCExpressionParameters.Parameter { name = "RemoveP", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+            };
+
+            var ctx2 = new BuildContext(root, null, isClone: true);
+            ExParamBuildProcessor.RunPass1(ctx2);
+            ExParamBuildProcessor.RunPass2(ctx2);
+            Assert.IsFalse(menuB.controls.Any(c => c.name == "KillToggle"));
+        }
+
+        [Test]
+        public void Pass2_Reports256BitOverflow_WhenAfterBitsExceedsLimit()
+        {
+            var root = Track(new GameObject("AvatarRoot"));
+            var desc = root.AddComponent<VRCAvatarDescriptor>();
+
+            var list = new List<VRCExpressionParameters.Parameter>();
+            for (int i = 0; i < 33; i++) // 33 * 8 = 264 > 256
+            {
+                list.Add(new VRCExpressionParameters.Parameter
+                {
+                    name = "Int_" + i,
+                    valueType = VRCExpressionParameters.ValueType.Int,
+                    networkSynced = true,
+                });
+            }
+            var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+            expParams.parameters = list.ToArray();
+            desc.expressionParameters = expParams;
+
+            var comp = root.AddComponent<ExParamManagerComponent>();
+            var ctx = new BuildContext(root, null, isClone: true);
+            ExParamBuildProcessor.RunPass1(ctx);
+            ExParamBuildProcessor.RunPass2(ctx);
+
+            Assert.IsTrue(ctx.GetState<ExParamBuildState>().RecordedReports.Any(
+                r => (r.Severity == ErrorSeverity.Error || r.Severity == ErrorSeverity.NonFatal)
+                     && r.Title.Contains("256")));
+        }
+
+        [Test]
+        public void Pass2_ProtectsPersistentAssets_LeavesOriginalAssetsUnchanged()
+        {
+            if (!Application.dataPath.Contains("ToolDevWorkspace"))
+            {
+                Assert.Pass("Persistent temp-asset test runs only in ToolDevWorkspace.");
+                return;
+            }
+
+            const string tempFolder = "Assets/_ExParamTestTemp_AutoDelete";
+            if (!UnityEditor.AssetDatabase.IsValidFolder(tempFolder))
+            {
+                UnityEditor.AssetDatabase.CreateFolder("Assets", "_ExParamTestTemp_AutoDelete");
+            }
+
+            try
+            {
+                var origParams = ScriptableObject.CreateInstance<VRCExpressionParameters>();
+                origParams.parameters = new[]
+                {
+                    new VRCExpressionParameters.Parameter { name = "TargetP", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, defaultValue = 4f },
+                    new VRCExpressionParameters.Parameter { name = "KeepP", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
+                };
+                UnityEditor.AssetDatabase.CreateAsset(origParams, tempFolder + "/OrigParams.asset");
+
+                var origMenu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
+                origMenu.controls.Add(new VRCExpressionsMenu.Control
+                {
+                    name = "TargetToggle",
+                    type = VRCExpressionsMenu.Control.ControlType.Toggle,
+                    parameter = new VRCExpressionsMenu.Control.Parameter { name = "TargetP" },
+                });
+                UnityEditor.AssetDatabase.CreateAsset(origMenu, tempFolder + "/OrigMenu.asset");
+
+                var origCtrl = AnimatorController.CreateAnimatorControllerAtPath(tempFolder + "/OrigCtrl.controller");
+                origCtrl.AddParameter("TargetP", AnimatorControllerParameterType.Int);
+                UnityEditor.AssetDatabase.SaveAssets();
+
+                var root = Track(new GameObject("AvatarRoot"));
+                var desc = root.AddComponent<VRCAvatarDescriptor>();
+                desc.expressionParameters = origParams;
+                desc.expressionsMenu = origMenu;
+                desc.customizeAnimationLayers = true;
+                desc.baseAnimationLayers = new[]
+                {
+                    new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = origCtrl },
+                };
+
+                var comp = root.AddComponent<ExParamManagerComponent>();
+                comp.rules.Add(new ParameterRule { parameterName = "TargetP", action = ParameterAction.Remove, hideMenuControlsOnRemove = true });
+
+                var ctx = new BuildContext(root, null, isClone: true);
+                ExParamBuildProcessor.RunPass1(ctx);
+                ExParamBuildProcessor.RunPass2(ctx);
+
+                // Replaced with clones
+                Assert.AreNotSame(origParams, desc.expressionParameters);
+                Assert.AreNotSame(origMenu, desc.expressionsMenu);
+                Assert.AreNotSame(origCtrl, desc.baseAnimationLayers[0].animatorController);
+
+                // Originals remain completely untouched
+                Assert.AreEqual(2, origParams.parameters.Length);
+                Assert.AreEqual(1, origMenu.controls.Count);
+                Assert.AreEqual(0, origCtrl.parameters[0].defaultInt);
+            }
+            finally
+            {
+                UnityEditor.AssetDatabase.DeleteAsset(tempFolder);
+                UnityEditor.AssetDatabase.Refresh();
+            }
         }
     }
 }

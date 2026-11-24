@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using nadena.dev.ndmf;
-using nadena.dev.ndmf.vrchat;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -100,7 +99,7 @@ namespace Sebanne.ExParamManager.Editor
                 return;
             }
 
-            VRCAvatarDescriptor descriptor = context.VRChatAvatarDescriptor();
+            VRCAvatarDescriptor descriptor = context.AvatarRootObject.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null)
             {
                 return;
@@ -707,13 +706,20 @@ namespace Sebanne.ExParamManager.Editor
                 return;
             }
 
-            if (ObjectRegistry.ActiveRegistry != null)
+            try
             {
-                ObjectRegistry.TryRegisterReplacedObject(ObjectRegistry.GetReference(oldObj), newObj);
+                if (ObjectRegistry.ActiveRegistry != null)
+                {
+                    ObjectRegistry.RegisterReplacedObject(oldObj, newObj);
+                }
+                else if (context.ObjectRegistry is IObjectRegistry reg)
+                {
+                    reg.RegisterReplacedObject(oldObj, newObj);
+                }
             }
-            else if (context.ObjectRegistry is IObjectRegistry reg)
+            catch (ArgumentException)
             {
-                reg.TryRegisterReplacedObject(reg.GetReference(oldObj), newObj);
+                // 既に別パス等で置換登録済みのオブジェクトは安全にスキップする
             }
         }
     }

@@ -45,8 +45,10 @@ namespace Sebanne.ExParamManager.Editor.Tests
                     name = "UnsignedIntOk",
                     valueType = VRCExpressionParameters.ValueType.Int,
                     networkSynced = true,
+#if HAS_VRCSDK3_AVATARS_3_10_6
                     bitWidth = 8,
                     flippedRepresentation = false,
+#endif
                 },
                 // Signed 2 bit is -2..1, so value 2 requires 3 bit (-4..3)
                 new VRCExpressionParameters.Parameter
@@ -54,8 +56,10 @@ namespace Sebanne.ExParamManager.Editor.Tests
                     name = "SignedIntNeeds3Bit",
                     valueType = VRCExpressionParameters.ValueType.Int,
                     networkSynced = true,
+#if HAS_VRCSDK3_AVATARS_3_10_6
                     bitWidth = 8,
                     flippedRepresentation = true,
+#endif
                 },
                 // No menu writer => excluded from strict recommendation
                 new VRCExpressionParameters.Parameter
@@ -63,7 +67,9 @@ namespace Sebanne.ExParamManager.Editor.Tests
                     name = "NoWriterInt",
                     valueType = VRCExpressionParameters.ValueType.Int,
                     networkSynced = true,
+#if HAS_VRCSDK3_AVATARS_3_10_6
                     bitWidth = 8,
+#endif
                 },
             };
             desc.expressionParameters = expParams;
@@ -112,8 +118,13 @@ namespace Sebanne.ExParamManager.Editor.Tests
 
             ParameterSnapshot sSnap = scan.Parameters.Find(p => p.EffectiveName == "SignedIntNeeds3Bit");
             Assert.IsTrue(sSnap.Suggestion.HasStrictIntRecommendation);
+#if HAS_VRCSDK3_AVATARS_3_10_6
             Assert.AreEqual(3, sSnap.Suggestion.RecommendedIntBitWidth);
             Assert.AreEqual(5, sSnap.Suggestion.IntBitSavings);
+#else
+            Assert.AreEqual(2, sSnap.Suggestion.RecommendedIntBitWidth);
+            Assert.AreEqual(6, sSnap.Suggestion.IntBitSavings);
+#endif
 
             ParameterSnapshot noWriter = scan.Parameters.Find(p => p.EffectiveName == "NoWriterInt");
             Assert.IsFalse(noWriter.Suggestion.HasStrictIntRecommendation);
@@ -129,10 +140,10 @@ namespace Sebanne.ExParamManager.Editor.Tests
             var expParams = Track(ScriptableObject.CreateInstance<VRCExpressionParameters>());
             expParams.parameters = new[]
             {
-                new VRCExpressionParameters.Parameter { name = "VRCEmote", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true, bitWidth = 8 },
-                new VRCExpressionParameters.Parameter { name = "QPro/Tongue", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true, bitWidth = 8 },
-                new VRCExpressionParameters.Parameter { name = "Go/Float", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true, bitWidth = 8 },
-                new VRCExpressionParameters.Parameter { name = "TailSize", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true, bitWidth = 8 },
+                new VRCExpressionParameters.Parameter { name = "VRCEmote", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "QPro/Tongue", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "Go/Float", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true },
+                new VRCExpressionParameters.Parameter { name = "TailSize", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true },
                 new VRCExpressionParameters.Parameter { name = "UnusedBool", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
             };
             desc.expressionParameters = expParams;

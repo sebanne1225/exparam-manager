@@ -112,6 +112,7 @@ namespace Sebanne.ExParamManager.Editor.Tests
         [Test]
         public void MaAdapter_AutoRegisters_AndDetectsSyncSequence_FalseOnEmptyObject()
         {
+#if HAS_MODULAR_AVATAR
             Assert.IsTrue(MaAdapterRegistry.IsAvailable);
             Assert.IsNotNull(MaAdapterRegistry.Current);
 
@@ -124,13 +125,25 @@ namespace Sebanne.ExParamManager.Editor.Tests
             {
                 Object.DestroyImmediate(go);
             }
+#else
+            Assert.IsFalse(MaAdapterRegistry.IsAvailable);
+            Assert.IsNull(MaAdapterRegistry.Current);
+#endif
         }
 
         [Test]
         public void EnvironmentCapabilities_DetectsSdk3106_Ndmf115_AndDynamicsTypes()
         {
+#if HAS_VRCSDK3_AVATARS_3_10_6
             Assert.IsTrue(EnvironmentCapabilities.HasVrcSdk3106);
+#else
+            Assert.IsFalse(EnvironmentCapabilities.HasVrcSdk3106);
+#endif
+#if HAS_NDMF_1_15
             Assert.IsTrue(EnvironmentCapabilities.HasNdmf115);
+#else
+            Assert.IsFalse(EnvironmentCapabilities.HasNdmf115);
+#endif
             Assert.IsTrue(EnvironmentCapabilities.SupportsDynamicsTypes);
         }
     }

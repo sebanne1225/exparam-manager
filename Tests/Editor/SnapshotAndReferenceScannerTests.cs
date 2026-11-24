@@ -47,16 +47,20 @@ namespace Sebanne.ExParamManager.Editor.Tests
                     valueType = VRCExpressionParameters.ValueType.Int,
                     networkSynced = true,
                     defaultValue = -1f,
+#if HAS_VRCSDK3_AVATARS_3_10_6
                     bitWidth = 3,
                     flippedRepresentation = true,
+#endif
                 },
                 new VRCExpressionParameters.Parameter
                 {
                     name = "RadialFloat",
                     valueType = VRCExpressionParameters.ValueType.Float,
                     networkSynced = true,
+#if HAS_VRCSDK3_AVATARS_3_10_6
                     bitWidth = 0, // 0 は 8 bit 扱い
                     flippedRepresentation = false,
+#endif
                 },
             };
             desc.expressionParameters = expParams;
@@ -64,13 +68,19 @@ namespace Sebanne.ExParamManager.Editor.Tests
             AvatarScanResult scan = AvatarScanner.Scan(desc);
 
             Assert.AreEqual(2, scan.Parameters.Count);
-            Assert.AreEqual(11, scan.TotalSyncedBits); // 3 + 8
             Assert.GreaterOrEqual(scan.PrefabGroups.Count, 1);
 
             ParameterSnapshot intSnap = scan.Parameters.Find(p => p.EffectiveName == "SignedInt");
             Assert.IsNotNull(intSnap);
+#if HAS_VRCSDK3_AVATARS_3_10_6
+            Assert.AreEqual(11, scan.TotalSyncedBits); // 3 + 8
             Assert.AreEqual(3, intSnap.CurrentBitWidth);
             Assert.AreEqual(ParameterSignednessKind.Signed, intSnap.Signedness);
+#else
+            Assert.AreEqual(16, scan.TotalSyncedBits); // 8 + 8
+            Assert.AreEqual(8, intSnap.CurrentBitWidth);
+            Assert.AreEqual(ParameterSignednessKind.Unsigned, intSnap.Signedness);
+#endif
 
             ParameterSnapshot floatSnap = scan.Parameters.Find(p => p.EffectiveName == "RadialFloat");
             Assert.IsNotNull(floatSnap);
