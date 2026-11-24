@@ -71,6 +71,7 @@ namespace Sebanne.ExParamManager.Editor
         private GUIStyle _wrappedMiniStyle;
         private GUIStyle _bigMetricStyle;
         private GUIStyle _bigDeltaStyle;
+        private GUIStyle _bigPausedStyle;
 
         [MenuItem("Tools/Sebanne/ExParam Manager")]
         public static void Open()
@@ -214,18 +215,28 @@ namespace Sebanne.ExParamManager.Editor
                 return;
             }
 
+            bool isPro = EditorGUIUtility.isProSkin;
+            Color primaryText = isPro ? new Color(0.95f, 0.96f, 0.98f, 1f) : new Color(0.10f, 0.10f, 0.12f, 1f);
+            Color subText = isPro ? new Color(0.75f, 0.77f, 0.80f, 1f) : new Color(0.35f, 0.35f, 0.38f, 1f);
+            Color deltaText = isPro ? new Color(0.42f, 0.94f, 0.58f, 1f) : new Color(0.08f, 0.52f, 0.22f, 1f);
+            Color pausedText = isPro ? new Color(0.96f, 0.82f, 0.38f, 1f) : new Color(0.62f, 0.40f, 0.05f, 1f);
+
             _boldNameStyle = new GUIStyle(EditorStyles.label)
             {
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 clipping = TextClipping.Clip,
+                normal = { textColor = primaryText },
+                hover = { textColor = primaryText },
+                active = { textColor = primaryText },
+                focused = { textColor = primaryText },
             };
 
             _subLabelStyle = new GUIStyle(EditorStyles.miniLabel)
             {
                 alignment = TextAnchor.MiddleLeft,
                 clipping = TextClipping.Clip,
-                normal = { textColor = new Color(0.72f, 0.72f, 0.72f, 1f) },
+                normal = { textColor = subText },
             };
 
             _badgeStyle = new GUIStyle(EditorStyles.miniLabel)
@@ -238,6 +249,10 @@ namespace Sebanne.ExParamManager.Editor
             _sectionHeaderStyle = new GUIStyle(EditorStyles.boldLabel)
             {
                 fontSize = 13,
+                normal = { textColor = primaryText },
+                hover = { textColor = primaryText },
+                active = { textColor = primaryText },
+                focused = { textColor = primaryText },
             };
 
             _headerLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
@@ -251,13 +266,30 @@ namespace Sebanne.ExParamManager.Editor
             {
                 fontSize = 18,
                 alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = primaryText },
+                hover = { textColor = primaryText },
+                active = { textColor = primaryText },
+                focused = { textColor = primaryText },
             };
 
             _bigDeltaStyle = new GUIStyle(EditorStyles.boldLabel)
             {
                 fontSize = 14,
                 alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = new Color(0.42f, 0.88f, 0.56f, 1f) },
+                normal = { textColor = deltaText },
+                hover = { textColor = deltaText },
+                active = { textColor = deltaText },
+                focused = { textColor = deltaText },
+            };
+
+            _bigPausedStyle = new GUIStyle(EditorStyles.boldLabel)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = pausedText },
+                hover = { textColor = pausedText },
+                active = { textColor = pausedText },
+                focused = { textColor = pausedText },
             };
         }
 
@@ -1155,6 +1187,9 @@ namespace Sebanne.ExParamManager.Editor
                     }
                 }
 
+                EditorGUILayout.Space(2f);
+                DrawSelectedActionDescription(p, curAction);
+
                 if (curAction == ParameterAction.Remove && rule != null)
                 {
                     EditorGUILayout.Space(2f);
@@ -1193,6 +1228,38 @@ namespace Sebanne.ExParamManager.Editor
                     EditorGUILayout.Space(4f);
                     DrawFloatSuggestionBox(comp, p);
                 }
+            }
+        }
+
+        private static void DrawSelectedActionDescription(ParameterSnapshot p, ParameterAction curAction)
+        {
+            switch (curAction)
+            {
+                case ParameterAction.Keep:
+                    EditorGUILayout.HelpBox("変更せず、現在と同じ bit 数のままビルドします。", MessageType.None);
+                    break;
+                case ParameterAction.Remove:
+                {
+                    string savedLine = p.Saved
+                        ? $"\n・状態保存(Saved)は外れ、初期値 ({p.DefaultValue}) が Animator へ引き継がれます。"
+                        : string.Empty;
+                    EditorGUILayout.HelpBox(
+                        $"使わない衣装・ギミックの整理向けです。元のアバター・アセットは変わりません。{savedLine}",
+                        MessageType.Info);
+                    break;
+                }
+                case ParameterAction.MakeLocal:
+                    EditorGUILayout.HelpBox(
+                        "自分の画面では動き、他のプレイヤーには同期されません（自分専用設定向け）。",
+                        MessageType.Info);
+                    break;
+                case ParameterAction.ResizeBitWidth:
+                    EditorGUILayout.HelpBox(
+                        EnvironmentCapabilities.HasVrcSdk3106
+                            ? "※ VRChat の 2 クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。"
+                            : "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小はスキップされます。",
+                        MessageType.Warning);
+                    break;
             }
         }
 
@@ -1239,19 +1306,19 @@ namespace Sebanne.ExParamManager.Editor
                 {
                     if (isPaused)
                     {
-                        EditorGUILayout.LabelField($"{beforeBit} bit → {beforeBit} bit", _bigMetricStyle, GUILayout.ExpandWidth(false));
+                        GUILayout.Label($"{beforeBit} bit → {beforeBit} bit", _bigMetricStyle, GUILayout.ExpandWidth(false), GUILayout.Height(24f));
                         GUILayout.Space(6f);
-                        EditorGUILayout.LabelField($"（一時オフ中・有効時 {potentialAfterBit} bit）", EditorStyles.miniLabel);
+                        GUILayout.Label($"（一時オフ中・有効時 {potentialAfterBit} bit）", _bigPausedStyle, GUILayout.Height(24f));
                     }
                     else if (afterBit < beforeBit)
                     {
-                        EditorGUILayout.LabelField($"{beforeBit} bit → {afterBit} bit", _bigMetricStyle, GUILayout.ExpandWidth(false));
+                        GUILayout.Label($"{beforeBit} bit → {afterBit} bit", _bigMetricStyle, GUILayout.ExpandWidth(false), GUILayout.Height(24f));
                         GUILayout.Space(6f);
-                        EditorGUILayout.LabelField($"(-{beforeBit - afterBit} bit)", _bigDeltaStyle);
+                        GUILayout.Label($"(-{beforeBit - afterBit} bit)", _bigDeltaStyle, GUILayout.Height(24f));
                     }
                     else
                     {
-                        EditorGUILayout.LabelField($"{beforeBit} bit（変更なし）", _bigMetricStyle);
+                        GUILayout.Label($"{beforeBit} bit（変更なし）", _bigMetricStyle, GUILayout.Height(24f));
                     }
                 }
 
@@ -1269,42 +1336,15 @@ namespace Sebanne.ExParamManager.Editor
                     BitBarDrawer.DrawBitBar(proj);
                 }
 
-                EditorGUILayout.Space(4f);
                 if (isGloballyDisabled)
                 {
+                    EditorGUILayout.Space(4f);
                     EditorGUILayout.HelpBox("ツール全体が一時オフのため、ビルド時は元のまま出力されます。", MessageType.Warning);
                 }
                 else if (isRuleDisabled)
                 {
+                    EditorGUILayout.Space(4f);
                     EditorGUILayout.HelpBox("この項目は一時オフ中のため、現在の設定を保持したままビルド適用から除外されます。", MessageType.Warning);
-                }
-                else if (hasRule)
-                {
-                    switch (rule.action)
-                    {
-                        case ParameterAction.Remove:
-                        {
-                            string savedLine = p.Saved
-                                ? $"\n・状態保存(Saved)は外れ、初期値 ({p.DefaultValue}) が Animator へ引き継がれます。"
-                                : string.Empty;
-                            EditorGUILayout.HelpBox(
-                                $"使わない衣装・ギミックの整理向けです。元のアバター・アセットは変わりません。{savedLine}",
-                                MessageType.Info);
-                            break;
-                        }
-                        case ParameterAction.MakeLocal:
-                            EditorGUILayout.HelpBox(
-                                "自分の画面では動き、他のプレイヤーには同期されません（自分専用設定向け）。",
-                                MessageType.Info);
-                            break;
-                        case ParameterAction.ResizeBitWidth:
-                            EditorGUILayout.HelpBox(
-                                EnvironmentCapabilities.HasVrcSdk3106
-                                    ? "※ VRChat の 2 クライアント間同期は未検証の実験的機能です。問題があれば「そのまま」に戻して再アップロードしてください。"
-                                    : "現在の VRChat SDK（3.10.5 以下）では bit 幅縮小はスキップされます。",
-                                MessageType.Warning);
-                            break;
-                    }
                 }
             }
         }
