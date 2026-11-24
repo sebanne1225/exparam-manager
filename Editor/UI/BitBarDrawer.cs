@@ -17,6 +17,8 @@ namespace Sebanne.ExParamManager.Editor
         public readonly int SkippedResizeOnOldSdkCount;
         public readonly int DisabledRuleCount;
         public readonly bool IsGloballyDisabled;
+        public readonly int BeforeSyncedParamCount;
+        public readonly int AfterSyncedParamCount;
 
         public BitProjection(
             int beforeBits,
@@ -26,7 +28,9 @@ namespace Sebanne.ExParamManager.Editor
             int resizeRuleCount,
             int skippedResizeOnOldSdkCount,
             int disabledRuleCount = 0,
-            bool isGloballyDisabled = false)
+            bool isGloballyDisabled = false,
+            int beforeSyncedParamCount = 0,
+            int afterSyncedParamCount = 0)
         {
             BeforeBits = beforeBits;
             AfterBits = afterBits;
@@ -37,6 +41,8 @@ namespace Sebanne.ExParamManager.Editor
             SkippedResizeOnOldSdkCount = skippedResizeOnOldSdkCount;
             DisabledRuleCount = disabledRuleCount;
             IsGloballyDisabled = isGloballyDisabled;
+            BeforeSyncedParamCount = beforeSyncedParamCount;
+            AfterSyncedParamCount = afterSyncedParamCount;
         }
     }
 
@@ -59,6 +65,8 @@ namespace Sebanne.ExParamManager.Editor
             int resizeCount = 0;
             int skippedOldSdk = 0;
             int disabledCount = 0;
+            int beforeSyncedCount = 0;
+            int afterSyncedCount = 0;
             bool globallyDisabled = component != null && !component.enabledOnBuild;
 
             for (int i = 0; i < scan.Parameters.Count; i++)
@@ -66,6 +74,10 @@ namespace Sebanne.ExParamManager.Editor
                 ParameterSnapshot p = scan.Parameters[i];
                 int cur = p.EffectiveBitCost;
                 beforeBits += cur;
+                if (p.IsSynced)
+                {
+                    beforeSyncedCount++;
+                }
 
                 ParameterRule rule = component != null
                     ? component.FindRule(p.EffectiveName, p.SourceComponent)
@@ -74,6 +86,10 @@ namespace Sebanne.ExParamManager.Editor
                 if (rule == null || rule.action == ParameterAction.Keep || p.IsInternalParameter)
                 {
                     afterBits += cur;
+                    if (p.IsSynced)
+                    {
+                        afterSyncedCount++;
+                    }
                     continue;
                 }
 
@@ -81,12 +97,20 @@ namespace Sebanne.ExParamManager.Editor
                 {
                     disabledCount++;
                     afterBits += cur;
+                    if (p.IsSynced)
+                    {
+                        afterSyncedCount++;
+                    }
                     continue;
                 }
 
                 if (globallyDisabled)
                 {
                     afterBits += cur;
+                    if (p.IsSynced)
+                    {
+                        afterSyncedCount++;
+                    }
                     continue;
                 }
 
@@ -101,6 +125,10 @@ namespace Sebanne.ExParamManager.Editor
                         break;
 
                     case ParameterAction.ResizeBitWidth:
+                        if (p.IsSynced)
+                        {
+                            afterSyncedCount++;
+                        }
                         if (!p.IsSynced || p.ValueKind == ParameterValueKind.Bool)
                         {
                             afterBits += cur;
@@ -119,11 +147,25 @@ namespace Sebanne.ExParamManager.Editor
 
                     default:
                         afterBits += cur;
+                        if (p.IsSynced)
+                        {
+                            afterSyncedCount++;
+                        }
                         break;
                 }
             }
 
-            return new BitProjection(beforeBits, afterBits, removeCount, localCount, resizeCount, skippedOldSdk, disabledCount, globallyDisabled);
+            return new BitProjection(
+                beforeBits,
+                afterBits,
+                removeCount,
+                localCount,
+                resizeCount,
+                skippedOldSdk,
+                disabledCount,
+                globallyDisabled,
+                beforeSyncedCount,
+                afterSyncedCount);
         }
 
         public static void DrawBitBar(BitProjection projection)
@@ -175,6 +217,45 @@ namespace Sebanne.ExParamManager.Editor
             {
                 text += "（全体一時オフ中）";
             }
+
+            var style = new GUIStyle(EditorStyles.boldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white },
+            };
+            GUI.Label(rect, text, style);
+        }
+
+        public static void DrawParameterBitBar(int beforeBit, int afterBit, int maxScaleBit, bool isPaused)
+        {
+            int safeMax = Mathf.Max(1, maxScaleBit);
+            float beforeRatio = Mathf.Clamp01(beforeBit / (float)safeMax);
+            float afterRatio = Mathf.Clamp01(afterBit / (float)safeMax);
+
+            Rect rect = GUILayoutUtility.GetRect(18, 24, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.14f, 0.14f, 0.14f, 1f));
+
+            int saved = Mathf.Max(0, beforeBit - afterBit);
+            if (!isPaused && saved > 0)
+            {
+                var beforeRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * beforeRatio), rect.height - 2f);
+                EditorGUI.DrawRect(beforeRect, new Color(0.35f, 0.72f, 0.48f, 0.28f));
+            }
+
+            Color fillColor = isPaused
+                ? new Color(0.42f, 0.44f, 0.48f, 1f)
+                : saved > 0
+                    ? new Color(0.24f, 0.65f, 0.38f, 1f)
+                    : new Color(0.34f, 0.50f, 0.68f, 1f);
+
+            var fillRect = new Rect(rect.x + 1, rect.y + 1, Mathf.Max(0f, (rect.width - 2f) * afterRatio), rect.height - 2f);
+            EditorGUI.DrawRect(fillRect, fillColor);
+
+            string text = isPaused
+                ? $"{beforeBit} bit（一時オフ中）"
+                : saved > 0
+                    ? $"{beforeBit} bit → {afterBit} bit（-{saved} bit 削減）"
+                    : $"{beforeBit} bit（そのまま）";
 
             var style = new GUIStyle(EditorStyles.boldLabel)
             {

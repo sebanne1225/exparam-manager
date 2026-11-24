@@ -27,7 +27,7 @@ namespace Sebanne.ExParamManager.Editor
             }
 
             EditorGUI.BeginChangeCheck();
-            bool newEnabled = EditorGUILayout.Toggle("ビルド時に適用 (Enabled On Build)", comp.enabledOnBuild);
+            bool newEnabled = EditorGUILayout.ToggleLeft("ビルド時に適用", comp.enabledOnBuild);
             if (EditorGUI.EndChangeCheck())
             {
                 RecordEdit(comp, "Toggle ExParam Manager Enabled");
@@ -107,9 +107,9 @@ namespace Sebanne.ExParamManager.Editor
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
-                    bool prune = EditorGUILayout.Toggle("今回空になった SubMenu を隠す", comp.pruneEmptySubMenus);
-                    bool allowSyncOverride = EditorGUILayout.Toggle("SyncParameterSequence 上書き許可", comp.allowOverrideWithSyncSequence);
-                    bool verbose = EditorGUILayout.Toggle("詳細ログを出力", comp.verboseLogging);
+                    bool prune = EditorGUILayout.ToggleLeft("空になった SubMenu を隠す", comp.pruneEmptySubMenus);
+                    bool allowSyncOverride = EditorGUILayout.ToggleLeft("SyncParameterSequence 上書き許可", comp.allowOverrideWithSyncSequence);
+                    bool verbose = EditorGUILayout.ToggleLeft("詳細ログを出力", comp.verboseLogging);
                     if (EditorGUI.EndChangeCheck())
                     {
                         RecordEdit(comp, "Edit ExParam Manager Settings");

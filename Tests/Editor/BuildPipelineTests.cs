@@ -447,6 +447,8 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.AreEqual(0, partial.MakeLocalRuleCount);
             Assert.AreEqual(1, partial.DisabledRuleCount);
             Assert.IsFalse(partial.IsGloballyDisabled);
+            Assert.AreEqual(2, partial.BeforeSyncedParamCount);
+            Assert.AreEqual(1, partial.AfterSyncedParamCount);
 
             comp.enabledOnBuild = false;
             BitProjection globalOff = BitBarDrawer.CalculateProjection(scan, comp, allowBitWidthResize: true);
@@ -455,6 +457,8 @@ namespace Sebanne.ExParamManager.Editor.Tests
             Assert.AreEqual(0, globalOff.SavedBits);
             Assert.AreEqual(1, globalOff.DisabledRuleCount);
             Assert.IsTrue(globalOff.IsGloballyDisabled);
+            Assert.AreEqual(2, globalOff.BeforeSyncedParamCount);
+            Assert.AreEqual(2, globalOff.AfterSyncedParamCount);
         }
     }
 }
